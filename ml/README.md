@@ -12,7 +12,39 @@ measure how often the AI was right on real donations.
 | Training | Google Colab, free T4 GPU, about 30–60 minutes |
 | Output | `raazicid_classifier.pt` (TorchScript) + `labels.json` (categories, preprocessing, metrics) |
 
-## 1. Take your own test photos
+## Two experiments
+
+| Notebook | Trains on | Tests on | Result so far |
+|---|---|---|---|
+| `train_classifier.ipynb` (experiment 1) | Open Images V7 | Open Images test split (+ own photos) | 59.5% top-1, 86% top-3 |
+| `train_own_dataset.ipynb` (experiment 2) | **Our own photos** | Our own photos of **different** items | run it and fill in |
+
+Experiment 1 showed that Open Images labels are noisy for our task (a photo labelled "Clothing" is usually a
+person, not a pile of clothes), so experiment 2 trains on photos that look like real donations.
+
+### Experiment 2: our own dataset
+
+In Google Drive:
+
+```
+MyDrive/raazicid/dataset/
+  train/   food/ grocery_ration/ clothes/ blankets/ winter_support/ hygiene/
+           baby/ household/ school_supplies/ books/ mobility_aids/ emergency_relief/
+  test/    (same 12 folders)
+```
+
+- **train/**: 100+ photos per category if possible (at least 50). Many different items, rooms, angles, light.
+- **test/**: 20–30 per category of **other items** than in train (photos of the same blanket from two angles
+  must not be split between train and test, or the score is too optimistic).
+- Without a `test/` folder, put the 12 folders straight into `dataset/` and 20% is kept aside automatically.
+- JPG, PNG, WEBP and iPhone HEIC work. The notebook fixes phone rotation, skips unreadable files, warns
+  about unknown folder names, and removes exact duplicates of train photos from test.
+
+Run it in Colab the same way (T4 GPU, Run all). Output goes to `MyDrive/raazicid/model_own/`:
+`raazicid_classifier.pt`, `labels.json`, `confusion_own_test.png`, `training_curve.png`, `mistakes.png`.
+Copy the first two into `backend/models/`.
+
+## 1. Take your own test photos (experiment 1)
 
 Take 20–30 photos per category with a phone, like a donor would: items on a bed, floor or table,
 normal light, some messy backgrounds. Different items, not 30 photos of the same blanket.
