@@ -27,11 +27,25 @@ class RiderList(BaseModel):
     total: int
 
 
+class AiCheck(BaseModel):
+    label: str
+    ok: Optional[bool]          # None = could not tell from the photos
+    detail: str
+
+
+class AiReview(BaseModel):
+    summary: str
+    checks: list[AiCheck]
+    model: str
+    created_at: datetime
+
+
 class RiderDetail(RiderListItem):
     email: Optional[str]
     review_note: Optional[str]
     reviewed_at: Optional[datetime]
     documents: list[RiderDocOut]
+    ai_review: Optional[AiReview] = None   # latest Claude document review (Phase 5), advisory only
 
 
 class RiderCounts(BaseModel):

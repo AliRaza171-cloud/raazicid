@@ -17,6 +17,7 @@ from app.schemas.donations import DonationIn, DonationList, DonationOut
 from app.schemas.jobs import HandOutIn, TrackingOut
 from app.services.donations import (
     ACTIVE, CANCELLABLE, DONE, change_status, check_location, current_job, donation_out, list_item,
+    nearest_food_point_km,
 )
 from app.services.jobs import tracking
 from app.services.urgency import food_urgency
@@ -36,7 +37,8 @@ def create_donation(body: DonationIn, user: User = Depends(donor_only), db: Sess
         raise api_error(422, "food_type_needed", "Say whether the food is cooked or dry / packed")
 
     now = datetime.now(timezone.utc)
-    score, _ = food_urgency(is_food, body.food_type, body.prepared_at, body.quantity, now)
+    score, _ = food_urgency(is_food, body.food_type, body.prepared_at, body.quantity, now,
+                            nearest_food_point_km(db, body.pickup.lat, body.pickup.lng))
     d = Donation(
         donor_id=user.id, category_id=cat.id,
         ai_category_id=body.ai.category_id if body.ai else None,

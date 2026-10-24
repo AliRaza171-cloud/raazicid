@@ -8,11 +8,12 @@ from sqlalchemy.orm import Session
 
 from app.models import Category, DistributionPoint, Donation, FraudFlag, Job, RiderPing, RiderProfile, User
 from app.models.enums import DonationStatus, ImageKind, JobStatus, RiderStatus, Role, Severity
-from app.schemas.jobs import AdminTrackingItem, JobOut, LatLng, Place, RiderOption, TrackingOut, TrackingRider
+from app.schemas.jobs import AdminTrackingItem, JobOut, LatLng, Place, RiderOption, ScoreReason, TrackingOut, TrackingRider
 from app.services.accounts import notify
 from app.services.donations import ref
 from app.services.geo import distance_km
 from app.services.locations import ancestor_ids, location_path
+from app.services.recommend import RiderFacts, score_rider
 
 ACTIVE_JOB = [JobStatus.assigned, JobStatus.accepted, JobStatus.picked_up]
 FAR_KM = 1.0              # proof photo further than this from where it should be -> fraud flag for an admin to check
@@ -44,27 +45,38 @@ def _match(chain_pickup: list, rider_location_id, db: Session) -> str:
     return "other"
 
 
-def rider_options(db: Session, d: Donation, limit: int = 15) -> list[RiderOption]:
-    """Approved riders, best first: available, nearest (GPS or home area), fewest active jobs.
-    Phase 5 replaces this with the scored recommendation (distance, load, availability, rating)."""
-    chain = ancestor_ids(db, d.pickup_location_id)
+def _facts(db: Session, d: Donation, user: User, rp: RiderProfile, chain: list) -> RiderFacts:
     fresh = datetime.now(timezone.utc) - timedelta(hours=2)
+    dist = None
+    if rp.last_lat is not None and rp.last_seen_at and rp.last_seen_at >= fresh:
+        dist = round(distance_km(rp.last_lat, rp.last_lng, d.pickup_lat, d.pickup_lng), 1)
+    return RiderFacts(distance_km=dist, area_match=_match(chain, user.location_id, db), active_jobs=active_jobs(db, user.id),
+                      is_available=rp.is_available, rating_avg=rp.rating_avg, vehicle=rp.vehicle_type.value)
+
+
+def rider_score(db: Session, d: Donation, user: User) -> tuple[int, list[tuple[str, int]]]:
+    cat = db.get(Category, d.category_id)
+    facts = _facts(db, d, user, user.rider_profile, ancestor_ids(db, d.pickup_location_id))
+    return score_rider(facts, d.quantity, cat.slug if cat else "")
+
+
+def rider_options(db: Session, d: Donation, limit: int = 15) -> list[RiderOption]:
+    """Approved riders ranked by the recommendation score (app/services/recommend.py), best first."""
+    chain = ancestor_ids(db, d.pickup_location_id)
+    cat = db.get(Category, d.category_id)
     out = []
     rows = db.execute(select(User, RiderProfile).join(RiderProfile, RiderProfile.user_id == User.id)
                       .where(RiderProfile.status == RiderStatus.approved, User.is_active.is_(True))).all()
     for user, rp in rows:
-        dist = None
-        if rp.last_lat is not None and rp.last_seen_at and rp.last_seen_at >= fresh:
-            dist = round(distance_km(rp.last_lat, rp.last_lng, d.pickup_lat, d.pickup_lng), 1)
+        f = _facts(db, d, user, rp, chain)
+        score, reasons = score_rider(f, d.quantity, cat.slug if cat else "")
         out.append(RiderOption(
             id=user.id, full_name=user.full_name, phone=user.phone, vehicle_type=rp.vehicle_type,
-            vehicle_number=rp.vehicle_number, is_available=rp.is_available, active_jobs=active_jobs(db, user.id),
-            match=_match(chain, user.location_id, db), distance_km=dist, last_seen_at=rp.last_seen_at,
-            rating_avg=rp.rating_avg,
+            vehicle_number=rp.vehicle_number, is_available=rp.is_available, active_jobs=f.active_jobs,
+            match=f.area_match, distance_km=f.distance_km, last_seen_at=rp.last_seen_at, rating_avg=rp.rating_avg,
+            score=score, reasons=[ScoreReason(label=l, points=p) for l, p in reasons],
         ))
-    order = {"same_area": 0, "same_region": 1, "same_city": 2, "same_province": 3, "other": 4}
-    out.sort(key=lambda r: (not r.is_available, r.distance_km if r.distance_km is not None else 999,
-                            order[r.match], r.active_jobs))
+    out.sort(key=lambda r: (-r.score, r.active_jobs))
     return out[:limit]
 
 

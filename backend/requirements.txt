@@ -11,13 +11,15 @@ email-validator>=2.2
 bcrypt>=4.2          # password hashing (Phase 2)
 pyjwt>=2.9           # access / refresh tokens (Phase 2)
 python-multipart>=0.0.18
+httpx>=0.28          # downloads donation photos for the classifier (Phase 5)
+pillow>=10.4         # reads photos for the classifier (Phase 5)
 
 # Tests
 pytest>=8.3
-httpx>=0.28
 
 # Later phases (install when you reach them):
-# torch, torchvision          - Phase 5 image classifier (MobileNetV2)
+# torch (CPU is enough)       - Phase 5 photo classifier. Optional; see ml/README.md:
+#                               pip install torch --index-url https://download.pytorch.org/whl/cpu
 # sentence-transformers       - Phase 6 RAG embeddings
 # anthropic                   - Phase 5 document review, Phase 6 RAG answers + web search
 # apscheduler                 - Phase 6 scheduled data fetching

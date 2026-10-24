@@ -210,20 +210,35 @@ Notifications are saved for the donor at every step (assigned, picked up, at poi
 for the rider (new job, job taken off), and for admins (rider declined). The inbox screen and
 `GET /notifications` come with the alerts in Phase 6.
 
-## AI suggestions [Phase 5]
+## AI suggestions [Phase 5, built]
 
 | Method | Path | Who | What |
 |---|---|---|---|
-| POST | `/ai/classify` | donor | `{ "image_url" }` → top 3 categories with confidence |
-| GET | `/admin/donations/{id}/recommended-riders` | admin | Top 3 riders with score parts |
-| GET | `/admin/donations/{id}/recommended-points` | admin | Top 3 points with reasons |
-| POST | `/admin/riders/{id}/ai-review` | admin | Run Claude document review |
+| GET | `/ai/status` | logged in | `{ classifier: "ready" \| "not_installed" \| "no_model", version, accuracy, own_photo_accuracy, document_review }` |
+| POST | `/ai/classify` | donor, admin | `{ "image_url" }` (our Cloudinary uploads only) → top 3 categories. 503 `classifier_not_ready` if the model is not installed |
+| GET | `/admin/ai/stats` | admin | How often donors kept the AI's choice (top-1 / top-3) on real donations |
+| GET | `/admin/donations/{id}/rider-options` | admin | Riders ranked by `score` (0–100) with `reasons` |
+| POST | `/admin/riders/{id}/ai-review` | admin | Claude checks the rider's documents; result in the rider detail as `ai_review` |
 
 ```json
-// GET /admin/donations/{id}/recommended-riders
-[{ "rider_id": "…", "name": "Usman Khan", "score": 94,
-   "parts": { "distance_km": 1.2, "active_jobs": 0, "available": true, "rating": 4.8 } }]
+// POST /ai/classify   { "image_url": "https://res.cloudinary.com/<cloud>/image/upload/…/1.jpg" }
+{ "model_version": "mobilenetv2-20261025-1030",
+  "suggestions": [{ "category_id": 4, "name": "Blankets", "p": 0.92 },
+                  { "category_id": 5, "name": "Winter support", "p": 0.05 },
+                  { "category_id": 3, "name": "Clothes", "p": 0.02 }] }
+
+// The donor app sends the suggestion with the donation (POST /donations "ai"):
+{ "ai": { "category_id": 4, "confidence": 0.92, "top3": [{ "category_id": 4, "p": 0.92 }, …] } }
+
+// GET /admin/donations/{id}/rider-options  (one item)
+{ "id": "…", "full_name": "Usman Khan", "score": 87,
+  "reasons": [{ "label": "1.2 km from pickup (live GPS)", "points": 37 }, { "label": "No active jobs", "points": 20 },
+              { "label": "Available now", "points": 15 }, { "label": "New rider, no rating yet", "points": 10 },
+              { "label": "Motorbike for a small load", "points": 10 }], … }
 ```
+
+Scoring rules and evaluation: `docs/ai-evaluation.md`. Food urgency now also adds distance to the
+nearest same-day food point and is refreshed while the food waits.
 
 ## Needs, need finder, alerts, appeals [Phase 6]
 

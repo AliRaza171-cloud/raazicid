@@ -8,7 +8,13 @@ import LocationPicker from "../../components/LocationPicker";
 import { Button, Chips, ErrorBox, Field, Screen } from "../../components/ui";
 import { colors } from "../../theme";
 
-type Params = { photoUrls: string[]; categoryId: number; categoryName: string; categorySlug: string };
+type Params = {
+  photoUrls: string[];
+  categoryId: number;
+  categoryName: string;
+  categorySlug: string;
+  ai: { category_id: number; confidence: number; top3: { category_id: number; p: number }[] } | null;
+};
 type Cond = "new" | "good" | "used";
 type FoodType = "cooked" | "dry";
 type Prepared = "lt1" | "1to2" | "2to4" | "gt4";
@@ -93,6 +99,7 @@ export default function DonateDetailsScreen() {
     const minutesAgo = PREPARED.find((p) => p.value === prepared)!.minutesAgo;
     const body = {
       category_id: params.categoryId,
+      ai: params.ai ?? null,   // the AI suggestion is kept next to the donor's choice, to measure accuracy
       title: title.trim(),
       quantity: qty,
       condition: isFood ? null : condition,

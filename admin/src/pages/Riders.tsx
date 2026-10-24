@@ -202,6 +202,19 @@ function RiderPanel({ id, onClose, onDecided }: { id: string; onClose: () => voi
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  const aiCheck = async () => {
+    setChecking(true);
+    setError(null);
+    try {
+      setR(await api<RiderDetail>(`/admin/riders/${id}/ai-review`, { method: "POST" }));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setChecking(false);
+    }
+  };
 
   useEffect(() => {
     setR(null);
@@ -273,6 +286,37 @@ function RiderPanel({ id, onClose, onDecided }: { id: string; onClose: () => voi
               })}
             </div>
           </div>
+
+          <section style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <h3 style={{ margin: 0, fontSize: 14, flex: 1 }}>AI document check</h3>
+              <button className="btn ghost small" disabled={checking || r.documents.length === 0} onClick={aiCheck}>
+                {checking ? "Checking… (up to 30 s)" : r.ai_review ? "Check again" : "Run AI check"}
+              </button>
+            </div>
+            {r.ai_review ? (
+              <>
+                <p style={{ margin: 0, fontSize: 14 }}>{r.ai_review.summary}</p>
+                <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6, fontSize: 13 }}>
+                  {r.ai_review.checks.map((c) => (
+                    <li key={c.label} style={{ display: "flex", gap: 8 }}>
+                      <span aria-label={c.ok === true ? "Looks fine" : c.ok === false ? "Problem" : "Could not tell"}
+                        style={{ fontWeight: 800, width: 16, color: c.ok === true ? "var(--green-700)" : c.ok === false ? "var(--urgent)" : "var(--warn)" }}>
+                        {c.ok === true ? "✓" : c.ok === false ? "✗" : "?"}
+                      </span>
+                      <span>
+                        <strong>{c.label}</strong>
+                        {c.detail ? <span className="muted"> · {c.detail}</span> : null}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <span className="muted small">{r.ai_review.model} · {date(r.ai_review.created_at)} · advisory only, you decide</span>
+              </>
+            ) : (
+              <span className="muted small">Claude reads the 4 photos and checks name, vehicle number and signs of editing. You still make the decision.</span>
+            )}
+          </section>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {ALLOWED[r.status].map((a) => (

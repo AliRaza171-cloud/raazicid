@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     RELIEFWEB_APPNAME: str = ""
     HDX_APP_IDENTIFIER: str = ""
 
+    # Photo classifier (Phase 5): folder with raazicid_classifier.pt + labels.json from ml/train_classifier.ipynb
+    CLASSIFIER_DIR: str = "models"
+    # Claude model for rider document review (Phase 5) and RAG answers (Phase 6)
+    CLAUDE_MODEL: str = "claude-sonnet-5-5"
+
     # RAG embeddings (PyTorch / sentence-transformers). 384 = size of the MiniLM models.
     EMBEDDING_MODEL: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     EMBEDDING_DIM: int = 384

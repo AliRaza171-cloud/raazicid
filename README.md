@@ -103,6 +103,20 @@ Commit the updated `package.json` and `package-lock.json` after this step.
 Already installed from an earlier phase? Add the new packages:
 `npx expo install expo-image-picker expo-location react-native-webview` (photo picker from Phase 2, GPS from Phase 3, maps from Phase 4).
 
+### 5. AI (Phase 5, optional)
+
+Everything works without these; the AI parts switch on when they are set up.
+
+- **Photo classifier:** train it in Google Colab with `ml/train_classifier.ipynb` (see `ml/README.md`),
+  copy `raazicid_classifier.pt` and `labels.json` into `backend/models/`, then in the backend venv:
+  ```powershell
+  pip install -r requirements.txt
+  pip install torch --index-url https://download.pytorch.org/whl/cpu
+  ```
+- **AI document check:** add `ANTHROPIC_API_KEY=` (from console.anthropic.com) to `backend/.env`.
+
+Restart the backend. The admin Dashboard's **AI** card shows what is ready.
+
 ---
 
 ## Working together
@@ -119,7 +133,7 @@ Already installed from an earlier phase? Add the new packages:
 - [x] Phase 2 — accounts and authentication (sign-up, login, rider documents and approval)
 - [x] Phase 3 — donations and distribution points (donate flow, admin review, points and requests)
 - [x] Phase 4 — pickup, delivery, tracking (assign rider, proofs with GPS checks, hand-out, live map)
-- [ ] Phase 5 — AI classification, rider recommendation, urgency
+- [x] Phase 5 — AI: photo classifier (PyTorch), rider score, urgency v2, Claude document check
 - [ ] Phase 6 — RAG need finder, needs by area, disaster alerts
 - [ ] Phase 7 — seasonal suggestions
 - [ ] Phase 8 — analytics, fraud flags, ratings

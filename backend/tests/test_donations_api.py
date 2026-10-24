@@ -130,8 +130,9 @@ def test_food_urgency_reject_and_validation(client, db):
     r = client.post(f"{API}/donations", headers=donor_h, json=food)
     assert r.status_code == 201, r.text
     d = r.json()
-    assert d["urgency_score"] == 74 and d["condition"] is None
-    assert [x["points"] for x in d["urgency_reasons"]] == [35, 25, 14]
+    # cooked 35 + 1-3 h 25 + 40 plates 14 (+ distance to the nearest food point, if any)
+    assert d["condition"] is None and [x["points"] for x in d["urgency_reasons"]][:3] == [35, 25, 14]
+    assert d["urgency_score"] == min(100, sum(x["points"] for x in d["urgency_reasons"]))
 
     # Food sorts first by urgency
     first = client.get(f"{API}/admin/donations", headers=admin_h, params={"sort": "urgency", "status": "in_review"}).json()["items"][0]

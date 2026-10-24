@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { PageHeader, ComingIn } from "../components/Layout";
-import { api, API_URL, type Category, type LocationItem } from "../lib/api";
+import { api, API_URL, type AiStats, type AiStatus, type Category, type LocationItem } from "../lib/api";
 
 type Health = { status: string; database?: string; pgvector?: boolean };
 
@@ -11,6 +11,8 @@ export default function Dashboard() {
   const [cats, setCats] = useState<Category[]>([]);
   const [provinces, setProvinces] = useState<LocationItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [ai, setAi] = useState<AiStatus | null>(null);
+  const [aiStats, setAiStats] = useState<AiStats | null>(null);
 
   useEffect(() => {
     api<Health>("/health")
@@ -21,6 +23,8 @@ export default function Dashboard() {
       .catch((e) => setError(String(e.message ?? e)));
     api<Category[]>("/categories").then(setCats).catch(() => undefined);
     api<LocationItem[]>("/locations").then(setProvinces).catch(() => undefined);
+    api<AiStatus>("/ai/status").then(setAi).catch(() => undefined);
+    api<AiStats>("/admin/ai/stats").then(setAiStats).catch(() => undefined);
   }, []);
 
   const chip = (ok: boolean | null) =>
@@ -61,6 +65,36 @@ export default function Dashboard() {
             </div>
           </section>
         )}
+        <section className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <h2 style={{ margin: 0, fontSize: 16 }}>AI</h2>
+          <div className="grid-kpi">
+            <div>
+              <div className="kpi-label">Photo classifier</div>
+              <div style={{ marginTop: 6 }}>
+                {ai === null ? <span className="chip wait">Checking</span>
+                  : ai.classifier === "ready" ? <span className="chip ok">Ready</span>
+                  : <span className="chip warn">{ai.classifier === "not_installed" ? "PyTorch not installed" : "Model files missing"}</span>}
+              </div>
+              {ai?.version && <div className="muted small" style={{ marginTop: 6 }}>{ai.version}</div>}
+            </div>
+            <div>
+              <div className="kpi-label">Test accuracy</div>
+              <div className="kpi-value">{ai?.accuracy != null ? `${Math.round(ai.accuracy * 100)}%` : "–"}</div>
+              <div className="muted small">Open Images test photos{ai?.own_photo_accuracy != null ? ` · own photos ${Math.round(ai.own_photo_accuracy * 100)}%` : ""}</div>
+            </div>
+            <div>
+              <div className="kpi-label">Donors kept the AI's choice</div>
+              <div className="kpi-value">{aiStats?.top1_rate != null ? `${Math.round(aiStats.top1_rate * 100)}%` : "–"}</div>
+              <div className="muted small">
+                {aiStats ? `${aiStats.top1_kept} of ${aiStats.donations_with_ai} real donations · in top 3: ${aiStats.top3_rate != null ? Math.round(aiStats.top3_rate * 100) + "%" : "–"}` : ""}
+              </div>
+            </div>
+            <div>
+              <div className="kpi-label">AI document check</div>
+              <div style={{ marginTop: 6 }}>{ai === null ? <span className="chip wait">Checking</span> : ai.document_review ? <span className="chip ok">Ready</span> : <span className="chip warn">Add ANTHROPIC_API_KEY</span>}</div>
+            </div>
+          </div>
+        </section>
         <ComingIn phase={8} what="KPI cards, the needs-your-action queue, seasonal panel, need hotspots and charts." />
       </main>
     </>

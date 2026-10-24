@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { PageHeader } from "../components/Layout";
-import { api, type Donation, type PointOption, type RiderOption } from "../lib/api";
+import { api, type Category, type Donation, type PointOption, type RiderOption } from "../lib/api";
 import { STATUS, dateTime, pointTypeLabel, urgencyChip, windowText } from "../lib/format";
 
 const PROOF = { pickup_proof: "Pickup", delivery_proof: "At the point", distribution_proof: "Hand-out" } as const;
@@ -26,6 +26,7 @@ export default function DonationDetail() {
   const [flash, setFlash] = useState<string | null>(null);
   const [zoom, setZoom] = useState<string | null>(null);
   const [riders, setRiders] = useState<RiderOption[] | null>(null);
+  const [catNames, setCatNames] = useState<Record<number, string>>({});
   const [riderId, setRiderId] = useState("");
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
@@ -59,6 +60,9 @@ export default function DonationDetail() {
   }, [id]);
 
   useEffect(load, [load]);
+  useEffect(() => {
+    api<Category[]>("/categories").then((cs) => setCatNames(Object.fromEntries(cs.map((c) => [c.id, c.name])))).catch(() => undefined);
+  }, []);
 
   const accept = async () => {
     setBusy(true);
@@ -168,6 +172,17 @@ export default function DonationDetail() {
                 ))}
               </div>
               <dl style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: "8px 16px", margin: 0, fontSize: 14 }}>
+                {d.ai && (
+                  <>
+                    <dt className="muted">AI category</dt>
+                    <dd style={{ margin: 0 }}>
+                      {d.ai.top3.map((t) => `${catNames[t.category_id] ?? t.category_id} ${Math.round(t.p * 100)}%`).join(" · ")}
+                      <div className={`small ${d.ai.category_id === d.category.id ? "muted" : ""}`} style={d.ai.category_id === d.category.id ? undefined : { color: "var(--warn)", fontWeight: 700 }}>
+                        {d.ai.category_id === d.category.id ? `Donor confirmed ${d.category.name}.` : `Donor chose ${d.category.name} instead.`}
+                      </div>
+                    </dd>
+                  </>
+                )}
                 <dt className="muted">Quantity</dt>
                 <dd style={{ margin: 0 }}>{d.quantity}</dd>
                 {d.is_food ? (
@@ -223,11 +238,14 @@ export default function DonationDetail() {
             {d.urgency_reasons.length > 0 && (
               <section className="card">
                 <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>Why it is urgent</h2>
-                <p className="muted small" style={{ margin: "0 0 10px" }}>Score {d.urgency_score} / 100 · rule-based (distance is added in Phase 5)</p>
+                <p className="muted small" style={{ margin: "0 0 10px" }}>
+                  Score {d.urgency_score} / 100 · rule-based{["in_review", "accepted", "rider_assigned"].includes(d.status) ? " · rises every hour the food waits" : ""}
+                </p>
                 {d.urgency_reasons.map((r) => (
-                  <div key={r.label} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
+                  <div key={r.label} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderTop: "1px solid var(--line)",
+                    ...(r.label.startsWith("Warning") ? { color: "var(--urgent)", fontWeight: 700 } : {}) }}>
                     <span>{r.label}</span>
-                    <strong>+{r.points}</strong>
+                    {r.points > 0 ? <strong>+{r.points}</strong> : null}
                   </div>
                 ))}
               </section>
@@ -344,7 +362,7 @@ export default function DonationDetail() {
               <>
                 <div>
                   <h2 style={{ margin: 0, fontSize: 16 }}>Which rider?</h2>
-                  <p className="muted small" style={{ margin: "4px 0 0" }}>Approved riders: available first, then nearest (live GPS or home area), then fewest jobs. Scored recommendation comes in Phase 5.</p>
+                  <p className="muted small" style={{ margin: "4px 0 0" }}>Ranked by score: distance to pickup (40), current jobs (20), available now (15), rating (15) and vehicle size for this load (10).</p>
                 </div>
                 {riders === null ? (
                   <p className="muted">Loading riders…</p>
@@ -357,13 +375,26 @@ export default function DonationDetail() {
                         border: riderId === r.id ? "2px solid var(--green-700)" : "1px solid var(--line-2)", background: riderId === r.id ? "var(--green-50)" : "#fff" }}>
                         <input type="radio" name="rider" checked={riderId === r.id} onChange={() => setRiderId(r.id)} style={{ marginTop: 3 }} />
                         <span style={{ flex: 1 }}>
-                          <strong style={{ color: "var(--ink)" }}>{r.full_name}</strong>
+                          <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <strong style={{ color: "var(--ink)", flex: 1 }}>{r.full_name}</strong>
+                            <span className={`chip ${r.score >= 70 ? "ok" : r.score >= 45 ? "warn" : "wait"}`} title="Recommendation score">{r.score} / 100</span>
+                          </span>
                           <span className="muted small" style={{ display: "block" }}>{r.vehicle_type} {r.vehicle_number} · {r.phone}</span>
                           <span className="small" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
                             <span className={`chip ${r.is_available ? "ok" : "wait"}`}>{r.is_available ? "Available" : "Off duty"}</span>
                             {r.distance_km !== null ? <span className="chip wait">{r.distance_km} km away</span> : <span className="chip wait">{MATCH[r.match]}</span>}
                             <span className="chip wait">{r.active_jobs} active job{r.active_jobs === 1 ? "" : "s"}</span>
                           </span>
+                          {riderId === r.id && (
+                            <span className="small" style={{ display: "block", marginTop: 8 }}>
+                              {r.reasons.map((x) => (
+                                <span key={x.label} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                                  <span className="muted">{x.label}</span>
+                                  <strong>+{x.points}</strong>
+                                </span>
+                              ))}
+                            </span>
+                          )}
                         </span>
                       </label>
                     ))}

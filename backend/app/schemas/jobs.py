@@ -29,6 +29,11 @@ class _Coords(BaseModel):
 
 # ---------- admin ----------
 
+class ScoreReason(BaseModel):
+    label: str
+    points: int
+
+
 class RiderOption(BaseModel):
     id: uuid.UUID
     full_name: str
@@ -41,6 +46,8 @@ class RiderOption(BaseModel):
     distance_km: Optional[float]      # from the rider's last GPS position (if seen in the last 2 hours)
     last_seen_at: Optional[datetime]
     rating_avg: Optional[float]
+    score: int                         # 0-100, see app/services/recommend.py
+    reasons: list[ScoreReason]
 
 
 class AssignIn(BaseModel):

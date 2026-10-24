@@ -27,3 +27,7 @@ pakistan_data_check.*
 *.pt
 *.pth
 data/raw/
+
+# Trained model files (download from Google Drive, see ml/README.md)
+backend/models/*
+!backend/models/README.md

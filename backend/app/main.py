@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import admin_donations, admin_riders, auth, donations, health, me, points, reference, rider
+from app.api.routes import admin_donations, admin_riders, ai, auth, donations, health, me, points, reference, rider
 from app.core.config import settings
 
 app = FastAPI(
@@ -29,6 +29,7 @@ app.include_router(donations.router, prefix=API_PREFIX)
 app.include_router(admin_donations.router, prefix=API_PREFIX)
 app.include_router(points.router, prefix=API_PREFIX)
 app.include_router(rider.router, prefix=API_PREFIX)
+app.include_router(ai.router, prefix=API_PREFIX)
 app.include_router(admin_donations.tracking_router, prefix=API_PREFIX)
 
 # Phase 3+: donations, points

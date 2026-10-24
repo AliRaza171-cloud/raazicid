@@ -15,8 +15,10 @@ from app.models.enums import DonationStatus, JobStatus, RiderStatus, Role
 from app.schemas.donations import AcceptIn, DonationCounts, DonationList, DonationOut, PointOption, RejectIn
 from app.schemas.jobs import AdminTrackingItem, AssignIn, ReasonIn, RiderOption
 from app.services.accounts import notify
-from app.services.donations import change_status, current_job, donation_out, list_item, point_options, point_takes
-from app.services.jobs import admin_tracking, rider_options
+from app.services.donations import (
+    change_status, current_job, donation_out, list_item, point_options, point_takes, refresh_urgency,
+)
+from app.services.jobs import admin_tracking, rider_options, rider_score
 from app.services.locations import descendant_ids
 
 router = APIRouter(prefix="/admin/donations", tags=["admin: donations"])
@@ -41,6 +43,7 @@ def list_donations(
     _: User = Depends(admin_only),
     db: Session = Depends(get_db),
 ):
+    refresh_urgency(db)   # cooked food gets more urgent every hour it waits
     filters = []
     if status:
         filters.append(Donation.status == status)
@@ -117,7 +120,9 @@ def assign(donation_id: uuid.UUID, body: AssignIn, admin: User = Depends(admin_o
     rider = db.get(User, body.rider_id)
     if rider is None or rider.rider_profile is None or rider.rider_profile.status != RiderStatus.approved or not rider.is_active:
         raise api_error(422, "rider_not_approved", "Choose an approved rider")
-    job = Job(donation_id=d.id, rider_id=rider.id, assigned_by=admin.id, status=JobStatus.assigned)
+    score, _ = rider_score(db, d, rider)
+    job = Job(donation_id=d.id, rider_id=rider.id, assigned_by=admin.id, status=JobStatus.assigned,
+              recommendation_score=score)
     db.add(job)
     change_status(db, d, DonationStatus.rider_assigned, admin, f"Assigned to {rider.full_name}")
     notify(db, rider, "job_assigned", "New pickup job", f"Pick up \"{d.title}\" from {d.pickup_address}.",

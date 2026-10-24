@@ -167,6 +167,24 @@ export interface RiderDetail extends RiderItem {
   review_note: string | null;
   reviewed_at: string | null;
   documents: { id: string; doc_type: string; file_url: string; created_at: string }[];
+  ai_review: { summary: string; checks: { label: string; ok: boolean | null; detail: string }[]; model: string; created_at: string } | null;
+}
+
+export interface AiStatus {
+  classifier: "ready" | "not_installed" | "no_model";
+  version: string | null;
+  accuracy: number | null;
+  own_photo_accuracy: number | null;
+  document_review: boolean;
+}
+
+export interface AiStats {
+  donations_with_ai: number;
+  top1_kept: number;
+  top3_hit: number;
+  top1_rate: number | null;
+  top3_rate: number | null;
+  by_category: { category_id: number; name: string; suggested: number; kept: number }[];
 }
 
 export type DonationStatus =
@@ -221,6 +239,8 @@ export interface RiderOption {
   distance_km: number | null;
   last_seen_at: string | null;
   rating_avg: number | null;
+  score: number;
+  reasons: { label: string; points: number }[];
 }
 
 export interface Place {

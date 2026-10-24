@@ -44,6 +44,41 @@ DONOR_MESSAGES: dict[S, tuple[str, str]] = {
 }
 
 
+URGENCY_LIVE = {S.in_review, S.accepted, S.rider_assigned}   # food still waiting: urgency keeps rising
+
+
+def nearest_food_point_km(db: Session, lat: float, lng: float) -> Optional[float]:
+    """Distance to the nearest open point that can hand out cooked food the same day."""
+    best = None
+    for p in db.scalars(select(DistributionPoint).where(DistributionPoint.same_day_food.is_(True))):
+        if point_is_open(p):
+            km = distance_km(lat, lng, p.lat, p.lng)
+            best = km if best is None or km < best else best
+    return best
+
+
+def urgency_for(db: Session, d: Donation, now: Optional[datetime] = None) -> tuple[Optional[int], list[tuple[str, int]]]:
+    """Live score while the food is waiting; frozen at pickup time once it is on its way or done."""
+    if not d.is_food:
+        return None, []
+    if now is None:
+        now = datetime.now(timezone.utc) if d.status in URGENCY_LIVE else d.created_at
+    return food_urgency(d.is_food, d.food_type, d.prepared_at, d.quantity, now,
+                        nearest_food_point_km(db, d.pickup_lat, d.pickup_lng))
+
+
+def refresh_urgency(db: Session) -> None:
+    """Re-score waiting food donations (time since cooking keeps growing). Called before the admin list."""
+    changed = False
+    for d in db.scalars(select(Donation).where(Donation.is_food.is_(True), Donation.status.in_(URGENCY_LIVE))):
+        score, _ = urgency_for(db, d)
+        if score != d.urgency_score:
+            d.urgency_score = score
+            changed = True
+    if changed:
+        db.commit()
+
+
 def ref(d: Donation) -> str:
     return "D-" + d.id.hex[:6].upper()
 
@@ -91,7 +126,7 @@ def donation_out(db: Session, d: Donation) -> DonationOut:
     point = db.get(DistributionPoint, d.point_id) if d.point_id else None
     donor = db.get(User, d.donor_id)
     names = {u.id: u.full_name for u in db.scalars(select(User).where(User.id.in_({h.changed_by for h in d.history if h.changed_by})))}
-    _, reasons = food_urgency(d.is_food, d.food_type, d.prepared_at, d.quantity, d.created_at)
+    _, reasons = urgency_for(db, d)
     ai = (
         AiSuggestion(category_id=d.ai_category_id, confidence=d.ai_confidence or 0, top3=d.ai_top3 or [])
         if d.ai_category_id else None
