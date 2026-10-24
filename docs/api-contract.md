@@ -35,18 +35,21 @@ Phase in brackets = when it gets built.
 [{ "id": "8f1c…", "name": "Karachi South", "level": "region", "parent_id": "<karachi-id>" }]
 ```
 
-## Auth and profile [Phase 2]
+## Auth and profile [Phase 2, built]
 
 | Method | Path | Who | What |
 |---|---|---|---|
-| POST | `/auth/register` | anyone | Create donor or rider |
-| POST | `/auth/login` | anyone | Phone/email + password → tokens |
-| POST | `/auth/refresh` | anyone | Refresh token → new access token |
-| POST | `/auth/logout` | logged in | Revoke refresh token |
-| GET / PATCH | `/me` | logged in | Own profile and location |
-| POST | `/me/rider-documents` | rider | Add a verification document URL |
-| GET | `/admin/riders?status=pending` | admin | Riders by status |
-| GET | `/admin/riders/{id}` | admin | Rider, documents, AI review |
+| POST | `/auth/register` | anyone | Create a donor or rider (admins are made with `python -m app.seed.create_admin`) |
+| POST | `/auth/login` | anyone | Phone or email + password → tokens |
+| POST | `/auth/refresh` | anyone | Refresh token → new access **and** refresh token (the old one stops working) |
+| POST | `/auth/logout` | anyone | Revoke a refresh token. Always 204 |
+| GET / PATCH | `/me` | logged in | Own profile: `full_name`, `email`, `location_id`, `address`, `lat`, `lng` |
+| GET | `/me/rider-documents` | rider | My uploaded documents |
+| POST | `/me/rider-documents` | rider | Add or replace one document (`cnic_front`, `cnic_back`, `driving_licence`, `vehicle_registration`) |
+| POST | `/uploads/sign` | logged in | Cloudinary upload signature |
+| GET | `/admin/riders/counts` | admin | `{ pending, approved, rejected, suspended }` for the tabs |
+| GET | `/admin/riders?status=pending&q=&limit=&offset=` | admin | Riders by status; `q` searches name, phone, vehicle number |
+| GET | `/admin/riders/{id}` | admin | Rider, documents, last review |
 | POST | `/admin/riders/{id}/decision` | admin | `approve` / `reject` / `suspend` / `request_document` |
 
 ```json
@@ -54,21 +57,52 @@ Phase in brackets = when it gets built.
 {
   "role": "rider",
   "full_name": "Usman Khan",
-  "phone": "03001234567",
-  "password": "********",
+  "phone": "0300-1234567",          // any Pakistani format; saved as 03001234567
+  "password": "********",           // 8–72 characters
   "location_id": "<area-id>",
-  "rider": { "vehicle_type": "motorbike", "vehicle_number": "KHI-4821" }
+  "rider": { "vehicle_type": "motorbike", "vehicle_number": "KHI-4821" }  // riders only
 }
 // 201
-{ "user": { "id": "…", "role": "rider", "full_name": "Usman Khan", "rider_status": "pending" },
+{ "user": { "id": "…", "role": "rider", "full_name": "Usman Khan", "phone": "03001234567",
+            "email": null, "location_path": ["Sindh", "Karachi", "Karachi South", "Saddar"],
+            "rider_status": "pending", "rider_note": null },
   "access_token": "…", "refresh_token": "…" }
+
+// POST /auth/login
+{ "login": "03001234567", "password": "********" }   // or an email
 ```
+
+Error codes: `phone_taken`, `email_taken`, `bad_location` (409/422 on register); `wrong_login` (401),
+`account_disabled` (403) on login; `invalid_refresh` (401); `not_authenticated` / `invalid_token` (401)
+and `forbidden` (403) on any protected endpoint.
+
+**Uploading a photo** (rider documents now; donation and proof photos in Phases 3–4):
+
+```json
+// POST /uploads/sign   { "purpose": "rider_document" }   // or donation_photo, proof_photo
+{ "upload_url": "https://api.cloudinary.com/v1_1/<cloud>/image/upload", "cloud_name": "<cloud>",
+  "api_key": "…", "timestamp": 1792831800, "folder": "raazicid/rider_document/<user-id>", "signature": "…" }
+```
+
+The app then POSTs the file as multipart to `upload_url` with `file`, `api_key`, `timestamp`, `folder`,
+`signature`, and sends the returned `secure_url` to the API (`POST /me/rider-documents`
+`{ "doc_type": "cnic_front", "file_url": "https://res.cloudinary.com/…" }`).
+`503 uploads_not_configured` means the Cloudinary keys are missing from `backend/.env`.
+
+**Rider status rules**
+
+- A new rider starts as `pending` and only sees the documents screen in the app.
+- Uploading a document again replaces the old one of that type. A `rejected` rider who uploads a
+  document goes back to `pending`. A `suspended` rider cannot upload (403).
+- `approve` needs at least one document (409 `no_documents`). `reject`, `suspend` and
+  `request_document` need a `note`, which the rider sees in the app (`rider_note`).
+- `request_document` keeps the rider `pending`. Every decision records who reviewed and when,
+  and sends the rider a notification.
 
 ## Donations [Phase 3]
 
 | Method | Path | Who | What |
 |---|---|---|---|
-| POST | `/uploads/sign` | logged in | Cloudinary upload signature |
 | POST | `/donations` | donor | Create donation |
 | GET | `/donations/mine?filter=active\|done\|all` | donor | My donations |
 | GET | `/donations/{id}` | owner, rider on it, admin | Detail + timeline + photos |

@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import health, reference
+from app.api.routes import admin_riders, auth, health, me, reference
 from app.core.config import settings
 
 app = FastAPI(
@@ -22,8 +22,10 @@ app.add_middleware(
 API_PREFIX = "/api/v1"
 app.include_router(health.router, prefix=API_PREFIX)
 app.include_router(reference.router, prefix=API_PREFIX)
+app.include_router(auth.router, prefix=API_PREFIX)
+app.include_router(me.router, prefix=API_PREFIX)
+app.include_router(admin_riders.router, prefix=API_PREFIX)
 
-# Phase 2+: auth, users, riders
 # Phase 3+: donations, points
 # Phase 4+: jobs, tracking, notifications
 # Phase 5-8: classify, needs, need-finder, alerts, appeals, seasonal, flags, analytics

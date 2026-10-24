@@ -21,7 +21,9 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:5173"
 
     # Third-party services (filled in as each phase needs them)
-    CLOUDINARY_URL: str = ""
+    CLOUDINARY_CLOUD_NAME: str = ""
+    CLOUDINARY_API_KEY: str = ""
+    CLOUDINARY_API_SECRET: str = ""
     GOOGLE_MAPS_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
     RELIEFWEB_APPNAME: str = ""

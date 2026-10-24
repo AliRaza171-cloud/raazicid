@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import type { ComponentProps } from "react";
+import { ActivityIndicator, View } from "react-native";
 import { useAuth } from "../auth";
 import { colors } from "../theme";
 
@@ -56,9 +57,17 @@ function RiderTabs() {
 
 /** Shows the right app for who is logged in: auth screens, donor app or rider app. */
 export default function RootNavigator() {
-  const { role, riderApproved } = useAuth();
+  const { status, user } = useAuth();
 
-  if (!role) {
+  if (status === "loading") {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  if (!user) {
     return (
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Login" component={LoginScreen} />
@@ -67,7 +76,8 @@ export default function RootNavigator() {
     );
   }
 
-  if (role === "rider" && !riderApproved) {
+  // Riders see the documents / review screen until an admin approves them
+  if (user.role === "rider" && user.rider_status !== "approved") {
     return (
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Pending" component={PendingScreen} />
@@ -75,7 +85,7 @@ export default function RootNavigator() {
     );
   }
 
-  if (role === "rider") {
+  if (user.role === "rider") {
     return (
       <Stack.Navigator>
         <Stack.Screen name="RiderTabs" component={RiderTabs} options={{ headerShown: false }} />

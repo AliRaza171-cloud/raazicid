@@ -4,9 +4,6 @@ The first tests need no database. The last one runs only if TEST_DATABASE_URL is
 (point it at an EMPTY Neon branch or a local Postgres with pgvector, never your real data).
 """
 
-import os
-
-import pytest
 from fastapi.testclient import TestClient
 
 import app.models as _models  # noqa: F401  (registers all tables; "as" keeps `app` below pointing at FastAPI)
@@ -39,24 +36,11 @@ def test_docs_page_loads():
     assert TestClient(app).get("/docs").status_code == 200
 
 
-@pytest.mark.skipif(not os.getenv("TEST_DATABASE_URL"), reason="set TEST_DATABASE_URL to run database tests")
-def test_create_tables_and_seed():
-    from sqlalchemy import create_engine, text
-    from sqlalchemy.orm import Session
-
+def test_seed_is_idempotent(engine, db):
+    """Seeding ran once in the session fixture; running again must add nothing."""
     from app.models import Category, Location
     from app.seed.run import seed
 
-    engine = create_engine(os.environ["TEST_DATABASE_URL"])
-    with engine.begin() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
-    with Session(engine) as db:
-        first = seed(db)
-        second = seed(db)   # running twice must not duplicate anything
-        assert first["categories"] == 12
-        assert second == {"categories": 0, "sources": 0, "locations": 0, "seasonal_rules": 0}
-        assert db.query(Category).count() == 12
-        assert db.query(Location).filter_by(name="Lyari").count() == 1
-    Base.metadata.drop_all(engine)
+    assert seed(db) == {"categories": 0, "sources": 0, "locations": 0, "seasonal_rules": 0}
+    assert db.query(Category).count() == 12
+    assert db.query(Location).filter_by(name="Lyari").count() == 1

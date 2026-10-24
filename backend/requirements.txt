@@ -22,5 +22,4 @@ httpx>=0.28
 # anthropic                   - Phase 5 document review, Phase 6 RAG answers + web search
 # apscheduler                 - Phase 6 scheduled data fetching
 # pypdf                       - Phase 6 reading report PDFs
-# cloudinary                  - Phase 3 photo uploads
 # hijridate                   - Phase 7 Ramadan / Eid dates

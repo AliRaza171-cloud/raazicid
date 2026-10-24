@@ -1,4 +1,5 @@
 import { NavLink } from "react-router-dom";
+import { useAuth } from "../lib/auth";
 
 type Item = { to: string; label: string };
 
@@ -27,6 +28,7 @@ const groups: { label: string; items: Item[] }[] = [
 ];
 
 export default function Sidebar() {
+  const { user, logout } = useAuth();
   return (
     <nav className="side" aria-label="Admin">
       <div className="brand">
@@ -47,9 +49,12 @@ export default function Sidebar() {
           ))}
         </div>
       ))}
-      <NavLink to="/login" className="side-link" style={{ marginTop: "auto" }}>
-        Log out
-      </NavLink>
+      <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+        {user && <span style={{ padding: "0 12px", fontSize: 13, color: "#8fb0a6" }}>Signed in as {user.full_name}</span>}
+        <button type="button" onClick={() => void logout()} className="side-link" style={{ border: 0, background: "none", font: "inherit", fontWeight: 600, cursor: "pointer", textAlign: "left" }}>
+          Log out
+        </button>
+      </div>
     </nav>
   );
 }
