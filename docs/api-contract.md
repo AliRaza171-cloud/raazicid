@@ -99,42 +99,80 @@ The app then POSTs the file as multipart to `upload_url` with `file`, `api_key`,
 - `request_document` keeps the rider `pending`. Every decision records who reviewed and when,
   and sends the rider a notification.
 
-## Donations [Phase 3]
+## Donations [Phase 3, built]
 
 | Method | Path | Who | What |
 |---|---|---|---|
-| POST | `/donations` | donor | Create donation |
-| GET | `/donations/mine?filter=active\|done\|all` | donor | My donations |
-| GET | `/donations/{id}` | owner, rider on it, admin | Detail + timeline + photos |
-| POST | `/donations/{id}/cancel` | donor | Only while `in_review` or `accepted` |
-| GET | `/admin/donations?status=&category=&province_id=&city_id=&sort=urgency` | admin | Table |
-| POST | `/admin/donations/{id}/accept` | admin | `{ "point_id": "…" }` |
-| POST | `/admin/donations/{id}/reject` | admin | `{ "reason": "…" }` |
+| POST | `/donations` | donor | Create donation (status `in_review`) |
+| GET | `/donations/mine?filter=active\|done\|all&limit=&offset=` | donor | My donations, newest first |
+| GET | `/donations/{id}` | owner, admin (rider on the job from Phase 4) | Detail + history + photos |
+| POST | `/donations/{id}/cancel` | donor | Only while `in_review` or `accepted` (409 `cannot_cancel`) |
+| GET | `/admin/donations/counts` | admin | Count per status, for the tabs |
+| GET | `/admin/donations?status=&category_id=&location_id=&q=&sort=urgency\|newest\|oldest` | admin | Table. `location_id` can be a province, city, region or area and includes everything under it |
+| GET | `/admin/donations/{id}/point-options` | admin | Open points that can take it, ranked (same area → region → city → province, then distance) |
+| POST | `/admin/donations/{id}/accept` | admin | `{ "point_id": "…" }` → `accepted` (409 `point_cannot_take` if the point is closed, does not take the category, or cannot hand out cooked food) |
+| POST | `/admin/donations/{id}/reject` | admin | `{ "reason": "…" }` → `rejected`; the donor sees the reason |
 
 ```json
 // POST /donations
 {
-  "category_id": 4,
-  "ai": { "category_id": 4, "confidence": 0.92, "top3": [{"category_id": 4, "p": 0.92}, {"category_id": 5, "p": 0.06}] },
-  "title": "10 blankets",
-  "quantity": 10,
-  "condition": "good",
-  "description": "Double-bed size, washed",
-  "is_food": false,
-  "pickup": { "address": "House 14, Block 7, Gulshan-e-Iqbal", "lat": 24.92, "lng": 67.09,
+  "category_id": 1,
+  "ai": null,                                  // filled by the classifier from Phase 5
+  "title": "Cooked rice, 40 plates",
+  "quantity": 40,
+  "condition": null,                           // new | good | used, not used for food
+  "description": "Packed in foil trays",
+  "is_food": true,
+  "food_type": "cooked",                       // cooked | dry; required when is_food
+  "prepared_at": "2026-10-24T08:00:00Z",       // required for cooked food
+  "pickup": { "address": "Shadi hall, Tariq Road", "lat": 24.87, "lng": 67.06,
               "location_id": "<area-id>", "from": "2026-10-24T11:00:00Z", "to": "2026-10-24T14:00:00Z" },
-  "photo_urls": ["https://res.cloudinary.com/…/1.jpg"]
+  "photo_urls": ["https://res.cloudinary.com/…/1.jpg"]   // 1–5, uploaded first with /uploads/sign
 }
-// 201 → full donation object, status "in_review"
+// 201 → full donation:
+{ "id": "…", "ref": "D-3F9A1C", "title": "…", "category": { "id": 1, "name": "Food" }, "quantity": 40,
+  "status": "in_review", "is_food": true, "urgency_score": 74,
+  "urgency_reasons": [{ "label": "Food type: cooked", "points": 35 }, { "label": "Time since prepared: 2 h", "points": 25 },
+                      { "label": "Quantity: 40", "points": 14 }],
+  "photo_url": "…", "photos": ["…"], "pickup_area": ["Karachi East", "PECHS"],
+  "pickup": { "address": "…", "lat": 24.87, "lng": 67.06, "location_path": ["Sindh", "Karachi", "Karachi East", "PECHS"],
+              "from": "…", "to": "…" },
+  "point": null, "point_name": null, "reject_reason": null,
+  "history": [{ "from_status": null, "to_status": "in_review", "note": "Created by donor", "by_name": "Hamza", "at": "…" }],
+  "donor": { "id": "…", "full_name": "Hamza", "phone": "03215550192", "donations_count": 4 },
+  "ai": null, "can_cancel": true, "created_at": "…" }
 ```
 
-## Distribution points [Phase 3]
+Rules: pickup must be inside Pakistan (catches swapped lat/lng), end after it starts, not be over
+already, and start within 7 days. The Food category is always saved as food.
+
+**Urgency (food only, 0–100, rule-based):** cooked +35 (dry +5); cooked time since prepared
+<1 h +10, 1–3 h +25, 3–6 h +35, 6 h+ +40; quantity +0.35 per item up to +20. Other categories have
+no score and sort after food. Phase 5 adds pickup distance.
+
+Every status move writes a `status_changes` row and notifies the donor (accepted, rejected, and
+the Phase 4 rider steps).
+
+## Distribution points [Phase 3, built]
 
 | Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/points?city_id=&category_id=` | admin, rider | List (map + table) |
-| POST / PATCH | `/admin/points`, `/admin/points/{id}` | admin | Create / edit |
-| POST | `/admin/points/{id}/requests` | admin, rider | Point request: `{ "category_id": 4, "quantity": 50, "note": "…" }` |
+| GET | `/points?location_id=&category_id=&open_only=` | admin, approved rider | List; riders only see open points |
+| GET | `/points/{id}` | admin, approved rider | Point + its requests |
+| POST | `/admin/points` | admin | Create |
+| PATCH | `/admin/points/{id}` | admin | Edit any field; `category_ids: []` = accepts everything |
+| POST | `/points/{id}/requests` | admin, approved rider | What people there need: `{ "category_id": 4, "quantity": 50, "note": "…" }` |
+| PATCH | `/admin/point-requests/{id}` | admin | `{ "status": "fulfilled" \| "cancelled" }` |
+
+```json
+// POST /admin/points
+{ "name": "Noor Community Point", "type": "mosque", "location_id": "<lyari-id>", "address": "Near Chakiwara Chowk",
+  "lat": 24.866, "lng": 67.0, "contact_name": "Bilal Ahmed", "contact_phone": "0300 1112223",
+  "same_day_food": true, "is_active": true, "closes_at": null, "category_ids": [] }
+// → point with "location_path", "categories": [{id, name}], "items_30d", "open_requests", "requests": []
+```
+
+A point is open when `is_active` is true and `closes_at` (for temporary relief camps) has not passed.
 
 ## Jobs, tracking, hand-out [Phase 4]
 

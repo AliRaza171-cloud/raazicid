@@ -63,3 +63,26 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2); 
 
 .todo { border: 2px dashed var(--line-2); border-radius: var(--radius); padding: 24px; color: var(--muted); background: #fafbf9; }
 .todo strong { color: var(--ink); }
+
+/* Phase 3 shared bits */
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+.btn.ghost { background: #fff; color: var(--ink); border: 1px solid var(--line-2); }
+.btn.ghost:hover { background: #f1f3ef; color: var(--ink); }
+.btn.danger { background: #fff; color: var(--urgent); border: 1px solid #edb49e; }
+.btn.danger:hover { background: var(--urgent-bg); color: var(--urgent); }
+.btn.small { height: 34px; padding: 0 12px; font-size: 13px; }
+.select { height: 42px; border: 1px solid var(--line-2); border-radius: 10px; padding: 0 10px; font: inherit; background: #fff; color: var(--ink); }
+.tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+.table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.table th { text-align: left; color: var(--muted); font-size: 12px; font-weight: 700; padding: 12px 16px; }
+.table td { padding: 12px 16px; border-top: 1px solid var(--line); vertical-align: top; }
+.table tr.click { cursor: pointer; }
+.table tr.click:hover td { background: #fafbf9; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.chip.warn { background: var(--warn-bg); color: var(--warn); }
+.chip.info { background: var(--info-bg); color: var(--info); }
+.chip.solid { background: var(--green-700); color: #fff; }
+.flash { padding: 12px 16px; border-radius: 12px; font-weight: 700; }
+.flash.ok { background: var(--green-50); color: #0b5e50; }
+.flash.bad { background: var(--urgent-bg); color: var(--urgent); }

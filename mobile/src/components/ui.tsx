@@ -48,11 +48,11 @@ export function Button({
   );
 }
 
-export function Field({ label, error, hint, ...input }: TextInputProps & { label: string; error?: string | null; hint?: string }) {
+export function Field({ label, error, hint, style, ...input }: TextInputProps & { label: string; error?: string | null; hint?: string }) {
   return (
     <View style={{ gap: 6 }}>
       <Text style={s.label}>{label}</Text>
-      <TextInput placeholderTextColor="#8A928E" style={[s.input, error ? { borderColor: colors.urgent } : null]} {...input} />
+      <TextInput accessibilityLabel={label} placeholderTextColor="#8A928E" style={[s.input, error ? { borderColor: colors.urgent } : null, style]} {...input} />
       {error ? <Text style={s.error}>{error}</Text> : hint ? <Text style={s.hint}>{hint}</Text> : null}
     </View>
   );

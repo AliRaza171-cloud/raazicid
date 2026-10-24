@@ -161,3 +161,34 @@ export interface RiderDoc {
   file_url: string;
   created_at: string;
 }
+
+export type DonationStatus =
+  | "in_review" | "accepted" | "rejected" | "rider_assigned" | "picked_up" | "at_point" | "handed_out" | "cancelled";
+
+export interface DonationListItem {
+  id: string;
+  ref: string;
+  title: string;
+  category: { id: number; name: string };
+  quantity: number;
+  status: DonationStatus;
+  is_food: boolean;
+  urgency_score: number | null;
+  photo_url: string | null;
+  pickup_area: string[];
+  point_name: string | null;
+  created_at: string;
+}
+
+export interface Donation extends DonationListItem {
+  description: string | null;
+  condition: "new" | "good" | "used" | null;
+  food_type: "cooked" | "dry" | null;
+  prepared_at: string | null;
+  pickup: { address: string; lat: number; lng: number; location_path: string[]; from: string | null; to: string | null };
+  point: { id: string; name: string; address: string; location_path: string[] } | null;
+  reject_reason: string | null;
+  photos: string[];
+  history: { from_status: DonationStatus | null; to_status: DonationStatus; note: string | null; by_name: string | null; at: string }[];
+  can_cancel: boolean;
+}

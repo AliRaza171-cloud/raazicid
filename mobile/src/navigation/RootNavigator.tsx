@@ -10,6 +10,7 @@ import LoginScreen from "../screens/auth/LoginScreen";
 import SignupScreen from "../screens/auth/SignupScreen";
 import AlertsScreen from "../screens/donor/AlertsScreen";
 import DonateDetailsScreen from "../screens/donor/DonateDetailsScreen";
+import DonationDetailScreen from "../screens/donor/DonationDetailScreen";
 import DonateScreen from "../screens/donor/DonateScreen";
 import DonationsScreen from "../screens/donor/DonationsScreen";
 import HomeScreen from "../screens/donor/HomeScreen";
@@ -97,7 +98,8 @@ export default function RootNavigator() {
   return (
     <Stack.Navigator>
       <Stack.Screen name="DonorTabs" component={DonorTabs} options={{ headerShown: false }} />
-      <Stack.Screen name="DonateDetails" component={DonateDetailsScreen} options={{ title: "Donation details" }} />
+      <Stack.Screen name="DonateDetails" component={DonateDetailsScreen} options={{ title: "New donation" }} />
+      <Stack.Screen name="DonationDetail" component={DonationDetailScreen} options={{ title: "Donation" }} />
       <Stack.Screen name="Tracking" component={TrackingScreen} options={{ title: "Live tracking" }} />
       <Stack.Screen name="Needs" component={NeedsScreen} options={{ title: "What is needed where" }} />
     </Stack.Navigator>

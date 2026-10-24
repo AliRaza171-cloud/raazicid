@@ -86,7 +86,7 @@ own installer, which picks matching versions:
 ```powershell
 cd mobile
 npm install expo@latest
-npx expo install react react-native react-native-screens react-native-safe-area-context expo-secure-store expo-image-picker expo-font expo-asset @expo/vector-icons @react-navigation/native @react-navigation/native-stack @react-navigation/bottom-tabs
+npx expo install react react-native react-native-screens react-native-safe-area-context expo-secure-store expo-image-picker expo-location expo-font expo-asset @expo/vector-icons @react-navigation/native @react-navigation/native-stack @react-navigation/bottom-tabs
 npm install -D typescript @types/react
 copy .env.example .env          # put your laptop's Wi-Fi IP (ipconfig → IPv4 Address)
 npx expo start
@@ -100,7 +100,8 @@ Scan the QR code with Expo Go. Phone and laptop must be on the **same Wi-Fi**, a
 run with `--host 0.0.0.0`. If Windows Firewall asks, allow Python on private networks.
 Commit the updated `package.json` and `package-lock.json` after this step.
 
-Already installed from Phase 1? Just add the photo picker: `npx expo install expo-image-picker`.
+Already installed from an earlier phase? Add the new packages:
+`npx expo install expo-image-picker expo-location` (photo picker from Phase 2, GPS for pickups from Phase 3).
 
 ---
 
@@ -116,7 +117,7 @@ Already installed from Phase 1? Just add the photo picker: `npx expo install exp
 
 - [x] Phase 1 — design (ERD, API contract, status flow), skeletons, data source check
 - [x] Phase 2 — accounts and authentication (sign-up, login, rider documents and approval)
-- [ ] Phase 3 — donations and distribution points
+- [x] Phase 3 — donations and distribution points (donate flow, admin review, points and requests)
 - [ ] Phase 4 — pickup, delivery, tracking
 - [ ] Phase 5 — AI classification, rider recommendation, urgency
 - [ ] Phase 6 — RAG need finder, needs by area, disaster alerts

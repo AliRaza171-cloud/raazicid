@@ -168,3 +168,85 @@ export interface RiderDetail extends RiderItem {
   reviewed_at: string | null;
   documents: { id: string; doc_type: string; file_url: string; created_at: string }[];
 }
+
+export type DonationStatus =
+  | "in_review" | "accepted" | "rejected" | "rider_assigned" | "picked_up" | "at_point" | "handed_out" | "cancelled";
+
+export interface DonationItem {
+  id: string;
+  ref: string;
+  title: string;
+  category: { id: number; name: string };
+  quantity: number;
+  status: DonationStatus;
+  is_food: boolean;
+  urgency_score: number | null;
+  photo_url: string | null;
+  pickup_area: string[];
+  point_name: string | null;
+  donor_name: string | null;
+  created_at: string;
+}
+
+export interface Donation extends DonationItem {
+  description: string | null;
+  condition: "new" | "good" | "used" | null;
+  food_type: "cooked" | "dry" | null;
+  prepared_at: string | null;
+  urgency_reasons: { label: string; points: number }[];
+  pickup: { address: string; lat: number; lng: number; location_path: string[]; from: string | null; to: string | null };
+  point: { id: string; name: string; address: string; location_path: string[] } | null;
+  reject_reason: string | null;
+  photos: string[];
+  history: { from_status: DonationStatus | null; to_status: DonationStatus; note: string | null; by_name: string | null; at: string }[];
+  donor: { id: string; full_name: string; phone: string; donations_count: number };
+  ai: { category_id: number; confidence: number; top3: { category_id: number; p: number }[] } | null;
+  can_cancel: boolean;
+}
+
+export interface PointOption {
+  id: string;
+  name: string;
+  type: string;
+  location_path: string[];
+  distance_km: number;
+  match: "same_area" | "same_region" | "same_city" | "same_province" | "other";
+  same_day_food: boolean;
+  items_30d: number;
+}
+
+export type PointType = "mosque" | "school" | "community_centre" | "relief_camp" | "other";
+
+export interface Point {
+  id: string;
+  name: string;
+  type: PointType;
+  location_id: string;
+  location_path: string[];
+  address: string;
+  lat: number;
+  lng: number;
+  contact_name: string | null;
+  contact_phone: string | null;
+  same_day_food: boolean;
+  is_active: boolean;
+  closes_at: string | null;
+  categories: { id: number; name: string }[];
+  items_30d: number;
+  open_requests: number;
+  created_at: string;
+}
+
+export interface PointRequest {
+  id: string;
+  category: { id: number; name: string };
+  quantity: number;
+  note: string | null;
+  status: "open" | "fulfilled" | "cancelled";
+  requested_by_name: string;
+  created_at: string;
+}
+
+export interface PointDetail extends Point {
+  requests: PointRequest[];
+}
