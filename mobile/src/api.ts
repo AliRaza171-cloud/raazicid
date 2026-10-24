@@ -63,10 +63,19 @@ async function rawFetch(path: string, init: RequestInit, token: string | null): 
   const headers: Record<string, string> = { Accept: "application/json" };
   if (init.body) headers["Content-Type"] = "application/json";
   if (token) headers.Authorization = `Bearer ${token}`;
+  // Without a timeout a wrong IP leaves the app spinning for minutes
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
   try {
-    return await fetch(`${API_URL}${path}`, { ...init, headers: { ...headers, ...(init.headers as Record<string, string>) } });
+    return await fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: { ...headers, ...(init.headers as Record<string, string>) },
+      signal: controller.signal,
+    });
   } catch {
-    throw new ApiError(0, "network", `Cannot reach the server at ${API_URL}. Same Wi-Fi? Is the backend running?`);
+    throw new ApiError(0, "network", `Cannot reach the server at ${API_URL}. Is the phone on the same Wi-Fi as the laptop, and is the backend running with --host 0.0.0.0?`);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

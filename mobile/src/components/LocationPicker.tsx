@@ -23,16 +23,22 @@ export default function LocationPicker({ onChange }: { onChange: (locationId: st
   const [error, setError] = useState<string | null>(null);
   const [childrenExist, setChildrenExist] = useState<boolean[]>([true, true, true, true]);
 
+  const parentId = open === null ? undefined : open === 0 ? null : picked[open - 1]?.id ?? null;
+
   useEffect(() => {
-    if (open === null) return;
-    const parent = open === 0 ? null : picked[open - 1];
+    if (parentId === undefined) return;
+    let alive = true;
+    setOptions([]);
     setLoading(true);
     setError(null);
-    api<LocationItem[]>(parent ? `/locations?parent_id=${parent.id}` : "/locations")
-      .then(setOptions)
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [open, picked]);
+    api<LocationItem[]>(parentId ? `/locations?parent_id=${parentId}` : "/locations")
+      .then((rows) => alive && setOptions(rows))
+      .catch((e: Error) => alive && setError(e.message))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [open, parentId]);
 
   const choose = async (level: number, item: LocationItem) => {
     const next: Picked = picked.map((p, i) => (i < level ? p : i === level ? item : null));
@@ -82,9 +88,16 @@ export default function LocationPicker({ onChange }: { onChange: (locationId: st
               <Text style={{ color: colors.primary, fontWeight: "700" }}>Close</Text>
             </Pressable>
           </View>
-          {loading ? <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} /> : null}
-          {error ? <Text style={{ color: colors.urgent, padding: 20 }}>{error}</Text> : null}
+          {loading ? (
+            <View style={{ alignItems: "center", gap: 10, marginTop: 40 }}>
+              <ActivityIndicator color={colors.primary} />
+              <Text style={{ color: colors.muted }}>Loading places…</Text>
+            </View>
+          ) : null}
+          {error ? <Text style={{ color: colors.urgent, padding: 20, fontWeight: "600" }}>{error}</Text> : null}
+          {!loading && !error && options.length === 0 ? <Text style={{ color: colors.muted, padding: 20 }}>No places found.</Text> : null}
           <FlatList
+            style={{ flex: 1 }}
             data={options}
             keyExtractor={(o) => o.id}
             renderItem={({ item }) => (
