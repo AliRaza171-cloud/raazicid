@@ -27,10 +27,29 @@ export async function uploadPhoto(uri: string, purpose: Purpose): Promise<string
   form.append("timestamp", String(sign.timestamp));
   form.append("folder", sign.folder);
   form.append("signature", sign.signature);
-  const res = await fetch(sign.upload_url, { method: "POST", body: form });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.secure_url) {
-    throw new ApiError(res.status, "upload_failed", data?.error?.message ?? "Upload failed. Try again.");
+
+  // XMLHttpRequest, not fetch: newer Expo versions replace fetch with one that rejects
+  // { uri, name, type } file parts ("Unsupported FormDataPart implementation").
+  const { status, data } = await new Promise<{ status: number; data: any }>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", sign.upload_url);
+    xhr.timeout = 60000;
+    xhr.onload = () => {
+      let body: any = {};
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        /* not JSON */
+      }
+      resolve({ status: xhr.status, data: body });
+    };
+    xhr.onerror = () => reject(new ApiError(0, "network", "Upload failed. Check your internet connection and try again."));
+    xhr.ontimeout = () => reject(new ApiError(0, "network", "Upload took too long. Try again on a better connection."));
+    xhr.send(form);
+  });
+
+  if (status < 200 || status >= 300 || !data?.secure_url) {
+    throw new ApiError(status, "upload_failed", data?.error?.message ?? "Upload failed. Try again.");
   }
   return data.secure_url as string;
 }
