@@ -1,0 +1,65 @@
+/* RAAZICID design tokens (match the design canvas) */
+:root {
+  --green-900: #0e2b26;   /* sidebar */
+  --green-700: #0f6b5c;   /* primary */
+  --green-800: #0a4f44;   /* primary hover */
+  --green-50: #e0f2ec;
+  --ink: #18201d;
+  --ink-2: #3a4440;
+  --muted: #56605b;
+  --line: #e2e6e1;
+  --line-2: #ccd3cd;
+  --bg: #f5f6f3;
+  --card: #ffffff;
+  --urgent: #a2361a;
+  --urgent-bg: #fce8e1;
+  --warn: #8a4b00;
+  --warn-bg: #fdf0dd;
+  --info: #2449a8;
+  --info-bg: #e4ecfb;
+  --radius: 14px;
+  font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+a { color: var(--green-700); }
+a:hover { color: var(--green-800); }
+
+.shell { min-height: 100vh; display: flex; flex-wrap: wrap; }
+.shell-side { flex: 1 1 248px; background: var(--green-900); }
+.shell-main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; }
+
+.side { padding: 24px 16px; display: flex; flex-direction: column; gap: 22px; color: #fff; min-height: 100%; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 8px; font-weight: 800; font-size: 17px; }
+.brand-mark { width: 36px; height: 36px; border-radius: 11px; background: #fff; display: grid; place-items: center; }
+.side-group { display: flex; flex-direction: column; gap: 2px; }
+.side-label { padding: 0 12px 6px; font-size: 11px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: #8fb0a6; }
+.side-link { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 0 12px; border-radius: 10px; font-size: 14px; font-weight: 600; color: #c9d8d3; text-decoration: none; }
+.side-link:hover { color: #fff; background: rgba(255,255,255,.06); }
+.side-link.active { background: #1e4a42; color: #fff; }
+
+.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 18px 32px; background: #fff; border-bottom: 1px solid var(--line); }
+.topbar h1 { margin: 0; font-size: 22px; font-weight: 800; }
+.topbar .sub { font-size: 13px; color: var(--muted); }
+.page { padding: 24px 32px 40px; display: flex; flex-direction: column; gap: 20px; width: 100%; max-width: 1320px; }
+
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
+.grid-kpi { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+.kpi-label { font-size: 13px; font-weight: 600; color: var(--muted); }
+.kpi-value { font-size: 28px; font-weight: 800; }
+
+.chip { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.chip.ok { background: var(--green-50); color: #0b5e50; }
+.chip.bad { background: var(--urgent-bg); color: var(--urgent); }
+.chip.wait { background: #eef0ec; color: #46504b; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; height: 42px; padding: 0 16px; border-radius: 10px; border: 0; background: var(--green-700); color: #fff; font: inherit; font-weight: 700; cursor: pointer; text-decoration: none; }
+.btn:hover { background: var(--green-800); color: #fff; }
+.input { width: 100%; height: 44px; border: 1px solid var(--line-2); border-radius: 10px; padding: 0 12px; font: inherit; }
+label { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 6px; }
+
+.todo { border: 2px dashed var(--line-2); border-radius: var(--radius); padding: 24px; color: var(--muted); background: #fafbf9; }
+.todo strong { color: var(--ink); }

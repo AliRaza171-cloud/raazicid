@@ -1,0 +1,29 @@
+# Secrets
+.env
+.env.local
+*.pem
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Node / Expo
+node_modules/
+dist/
+.expo/
+web-build/
+*.tsbuildinfo
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Data check outputs and ML artefacts
+pakistan_data_check.*
+*.pt
+*.pth
+data/raw/

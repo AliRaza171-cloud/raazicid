@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "RAAZICID",
+    "slug": "raazicid",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "android": {
+      "package": "com.raazicid.app"
+    },
+    "ios": {
+      "bundleIdentifier": "com.raazicid.app"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-font",
+      "expo-asset"
+    ]
+  }
+}

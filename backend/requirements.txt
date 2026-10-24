@@ -1,0 +1,26 @@
+# Python 3.12 or 3.13 recommended (best support for PyTorch in later phases)
+fastapi>=0.115
+uvicorn[standard]>=0.32
+sqlalchemy>=2.0.36
+alembic>=1.14
+psycopg[binary]>=3.2
+pgvector>=0.3.6
+pydantic>=2.10
+pydantic-settings>=2.6
+email-validator>=2.2
+bcrypt>=4.2          # password hashing (Phase 2)
+pyjwt>=2.9           # access / refresh tokens (Phase 2)
+python-multipart>=0.0.18
+
+# Tests
+pytest>=8.3
+httpx>=0.28
+
+# Later phases (install when you reach them):
+# torch, torchvision          - Phase 5 image classifier (MobileNetV2)
+# sentence-transformers       - Phase 6 RAG embeddings
+# anthropic                   - Phase 5 document review, Phase 6 RAG answers + web search
+# apscheduler                 - Phase 6 scheduled data fetching
+# pypdf                       - Phase 6 reading report PDFs
+# cloudinary                  - Phase 3 photo uploads
+# hijridate                   - Phase 7 Ramadan / Eid dates

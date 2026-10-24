@@ -1,0 +1,102 @@
+# RAAZICID
+
+AI-guided donation collection and distribution for Pakistan. Donors give items through the mobile app,
+RAAZICID riders collect them and our team hands them out at distribution points in the areas that
+need them most. Need is found with a RAG over official reports (IPC, NDMA / PDMA via ReliefWeb,
+GDACS, HDX) plus Claude web search, and seasonal rules.
+
+Final Year Project, Department of Software Engineering.
+
+| Folder | What | Tech |
+|---|---|---|
+| `backend/` | API, database, AI / RAG (later phases) | Python, FastAPI, SQLAlchemy, PostgreSQL (Neon) + pgvector |
+| `admin/` | Web app for RAAZICID admins | React + TypeScript (Vite) |
+| `mobile/` | App for donors and riders | React Native (Expo) |
+| `docs/` | Database design, API contract, status flow | Markdown + Mermaid diagrams |
+
+Start with [`docs/ERD.md`](docs/ERD.md), [`docs/api-contract.md`](docs/api-contract.md) and
+[`docs/status-flow.md`](docs/status-flow.md).
+
+---
+
+## First-time setup (Windows)
+
+You need: **Python 3.12 or 3.13**, **Node.js 20+**, **Git**, the **Expo Go** app on your Android phone,
+and a free **Neon** account (neon.tech).
+
+### 1. Database (Neon)
+
+1. In Neon, create a project named `raazicid`.
+2. Copy the connection string (Dashboard → Connect). It looks like
+   `postgresql://user:password@ep-xxx.aws.neon.tech/neondb?sslmode=require`.
+3. Change the start to `postgresql+psycopg://` — that is the `DATABASE_URL` for step 2.
+
+### 2. Backend
+
+```powershell
+cd backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env          # then open .env and paste your DATABASE_URL
+alembic upgrade head            # creates all tables + pgvector
+python -m app.seed.run          # adds categories, provinces, cities, Karachi areas, seasonal rules
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Open http://localhost:8000/docs — you should see the API, and `GET /api/v1/health/db` should say
+`"database": "reachable", "pgvector": true`.
+
+Run the tests: `pytest` (database tests run only if you set `TEST_DATABASE_URL` to an **empty** Neon branch).
+
+### 3. Admin web app
+
+```powershell
+cd admin
+npm install
+copy .env.example .env.local
+npm run dev
+```
+
+Open http://localhost:5173. The Dashboard shows green checks when it can reach the backend and database,
+and lists the 12 categories from the database.
+
+### 4. Mobile app (one-time install)
+
+Expo Go on your phone only runs the **latest** Expo version, so install the packages with Expo's
+own installer, which picks matching versions:
+
+```powershell
+cd mobile
+npm install expo@latest
+npx expo install react react-native react-native-screens react-native-safe-area-context expo-status-bar expo-secure-store @react-navigation/native @react-navigation/native-stack @react-navigation/bottom-tabs
+npm install -D typescript @types/react
+copy .env.example .env          # put your laptop's Wi-Fi IP (ipconfig → IPv4 Address)
+npx expo start
+```
+
+Scan the QR code with Expo Go. Phone and laptop must be on the **same Wi-Fi**, and the backend must
+run with `--host 0.0.0.0`. If Windows Firewall asks, allow Python on private networks.
+Commit the updated `package.json` and `package-lock.json` after this step.
+
+---
+
+## Working together
+
+- `main` always works. Build each feature on a branch (`feat/donations-api`), open a pull request,
+  the other person reviews.
+- Change `docs/api-contract.md` **before** changing an endpoint.
+- Database change = model change + `alembic revision --autogenerate -m "what changed"` + `alembic upgrade head`.
+- Never commit `.env` files or keys.
+
+## Phase status
+
+- [x] Phase 1 — design (ERD, API contract, status flow), skeletons, data source check
+- [ ] Phase 2 — accounts and authentication
+- [ ] Phase 3 — donations and distribution points
+- [ ] Phase 4 — pickup, delivery, tracking
+- [ ] Phase 5 — AI classification, rider recommendation, urgency
+- [ ] Phase 6 — RAG need finder, needs by area, disaster alerts
+- [ ] Phase 7 — seasonal suggestions
+- [ ] Phase 8 — analytics, fraud flags, ratings
+- [ ] Phase 9 — testing, evaluation, deployment
