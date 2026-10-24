@@ -46,10 +46,10 @@ export default function PendingScreen() {
   const doUpload = async (type: DocType, source: "camera" | "gallery") => {
     setError(null);
     try {
-      const uri = await pickPhoto(source);
-      if (!uri) return;
+      const photo = await pickPhoto(source);
+      if (!photo) return;
       setBusyType(type);
-      const url = await uploadPhoto(uri, "rider_document");
+      const url = await uploadPhoto(photo, "rider_document");
       await api("/me/rider-documents", { method: "POST", body: JSON.stringify({ doc_type: type, file_url: url }) });
       await load();
     } catch (e) {
