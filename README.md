@@ -69,11 +69,15 @@ own installer, which picks matching versions:
 ```powershell
 cd mobile
 npm install expo@latest
-npx expo install react react-native react-native-screens react-native-safe-area-context expo-status-bar expo-secure-store @react-navigation/native @react-navigation/native-stack @react-navigation/bottom-tabs
+npx expo install react react-native react-native-screens react-native-safe-area-context expo-secure-store @expo/vector-icons @react-navigation/native @react-navigation/native-stack @react-navigation/bottom-tabs
 npm install -D typescript @types/react
 copy .env.example .env          # put your laptop's Wi-Fi IP (ipconfig → IPv4 Address)
 npx expo start
 ```
+
+If Expo Go says the project needs a newer version, update Expo Go from the Play Store. If it is
+already up to date, check the SDK number in Expo Go → Settings and run
+`npm install expo@~<that number>.0.0` then `npx expo install --fix`.
 
 Scan the QR code with Expo Go. Phone and laptop must be on the **same Wi-Fi**, and the backend must
 run with `--host 0.0.0.0`. If Windows Firewall asks, allow Python on private networks.
