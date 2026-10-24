@@ -8,12 +8,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import api_error
-from app.models import Category, DistributionPoint, Donation, Location, PointRequest, StatusChange, User
+from app.models import Category, DistributionPoint, Donation, HandOut, Job, Location, PointRequest, StatusChange, User
 from app.models.enums import DonationStatus as S
-from app.models.enums import ImageKind, RequestStatus
+from app.models.enums import ImageKind, JobStatus, RequestStatus
 from app.schemas.donations import (
-    AiSuggestion, CategoryRef, DonationListItem, DonationOut, DonorRef, HistoryItem, Pickup, PointOption,
-    PointRef, UrgencyReason,
+    AiSuggestion, CategoryRef, DonationListItem, DonationOut, DonorRef, HandOutRef, HistoryItem, JobRef, Pickup,
+    PointOption, PointRef, ProofPhoto, UrgencyReason,
 )
 from app.schemas.points import PointOut
 from app.services.accounts import notify
@@ -40,7 +40,7 @@ DONOR_MESSAGES: dict[S, tuple[str, str]] = {
     S.rider_assigned: ("Rider assigned", "A rider is coming to pick up \"{title}\"."),
     S.picked_up: ("Picked up", "\"{title}\" has been picked up. Thank you!"),
     S.at_point: ("Delivered to the point", "\"{title}\" reached {point}."),
-    S.handed_out: ("Handed out", "\"{title}\" has been handed out to families. Thank you!"),
+    S.handed_out: ("Handed out", "\"{title}\" was handed out at {point}. {note} Thank you!"),
 }
 
 
@@ -48,14 +48,16 @@ def ref(d: Donation) -> str:
     return "D-" + d.id.hex[:6].upper()
 
 
-def change_status(db: Session, d: Donation, to: S, by: Optional[User], note: Optional[str] = None) -> None:
+def change_status(
+    db: Session, d: Donation, to: S, by: Optional[User], note: Optional[str] = None, tell_donor: bool = True
+) -> None:
     """Move a donation, record it in the history and notify the donor. Caller commits."""
     if to not in ALLOWED.get(d.status, set()):
         raise api_error(409, "bad_status", f"A donation that is {d.status.value.replace('_', ' ')} cannot become {to.value.replace('_', ' ')}")
     db.add(StatusChange(donation_id=d.id, from_status=d.status, to_status=to, changed_by=by.id if by else None, note=note))
     d.status = to
     msg = DONOR_MESSAGES.get(to)
-    if msg and (by is None or by.id != d.donor_id):
+    if msg and tell_donor and (by is None or by.id != d.donor_id):
         donor = db.get(User, d.donor_id)
         point = db.get(DistributionPoint, d.point_id) if d.point_id else None
         title, body = msg
@@ -117,7 +119,52 @@ def donation_out(db: Session, d: Donation) -> DonationOut:
         ),
         ai=ai,
         can_cancel=d.status in CANCELLABLE,
+        job=_job_ref(db, d),
+        proofs=_proofs(db, d, point),
+        hand_out=_hand_out(db, d),
     )
+
+
+def current_job(db: Session, d: Donation) -> Optional[Job]:
+    """The newest job that was not declined or cancelled."""
+    return db.scalar(
+        select(Job).where(Job.donation_id == d.id, Job.status.notin_([JobStatus.declined, JobStatus.cancelled]))
+        .order_by(Job.created_at.desc()).limit(1)
+    )
+
+
+def _job_ref(db: Session, d: Donation) -> Optional[JobRef]:
+    job = current_job(db, d)
+    if job is None:
+        return None
+    rider = db.get(User, job.rider_id)
+    rp = rider.rider_profile
+    return JobRef(id=job.id, status=job.status.value, rider_id=rider.id, rider_name=rider.full_name, rider_phone=rider.phone,
+                  vehicle=f"{rp.vehicle_type.value.title()} {rp.vehicle_number}" if rp else "", assigned_at=job.created_at)
+
+
+def _proofs(db: Session, d: Donation, point: Optional[DistributionPoint]) -> list[ProofPhoto]:
+    out = []
+    for i in d.images:
+        if i.kind == ImageKind.donor_photo:
+            continue
+        dist = None
+        if i.lat is not None and i.lng is not None:
+            if i.kind == ImageKind.pickup_proof:
+                dist = round(distance_km(i.lat, i.lng, d.pickup_lat, d.pickup_lng), 2)
+            elif point is not None:
+                dist = round(distance_km(i.lat, i.lng, point.lat, point.lng), 2)
+        out.append(ProofPhoto(kind=i.kind.value, url=i.url, lat=i.lat, lng=i.lng, distance_km=dist, at=i.created_at))
+    return out
+
+
+def _hand_out(db: Session, d: Donation) -> Optional[HandOutRef]:
+    h = db.scalar(select(HandOut).where(HandOut.donation_id == d.id).order_by(HandOut.created_at.desc()).limit(1))
+    if h is None:
+        return None
+    by = db.get(User, h.handed_out_by)
+    return HandOutRef(quantity=h.quantity, families_served=h.families_served, photo_url=h.photo_url, note=h.note,
+                      by_name=by.full_name if by else "?", at=h.created_at)
 
 
 # ---------- distribution points ----------

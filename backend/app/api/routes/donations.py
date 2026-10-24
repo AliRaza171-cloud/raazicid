@@ -11,10 +11,14 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_current_user, require_roles
 from app.core.errors import api_error
 from app.db.session import get_db
-from app.models import Category, Donation, DonationImage, StatusChange, User
-from app.models.enums import DonationStatus, ImageKind, Role
+from app.models import Category, DistributionPoint, Donation, DonationImage, HandOut, Job, StatusChange, User
+from app.models.enums import DonationStatus, ImageKind, JobStatus, Role
 from app.schemas.donations import DonationIn, DonationList, DonationOut
-from app.services.donations import ACTIVE, CANCELLABLE, DONE, change_status, check_location, donation_out, list_item
+from app.schemas.jobs import HandOutIn, TrackingOut
+from app.services.donations import (
+    ACTIVE, CANCELLABLE, DONE, change_status, check_location, current_job, donation_out, list_item,
+)
+from app.services.jobs import tracking
 from app.services.urgency import food_urgency
 
 router = APIRouter(prefix="/donations", tags=["donations"])
@@ -76,11 +80,15 @@ def my_donations(
 
 
 def _get_visible(db: Session, donation_id: uuid.UUID, user: User) -> Donation:
+    """Admins, the donor, and a rider who has (or had) a job on it."""
     d = db.get(Donation, donation_id)
-    # Phase 4: the rider on the job can see it too
-    if d is None or (user.role != Role.admin and d.donor_id != user.id):
+    if d is None:
         raise api_error(404, "donation_not_found", "Donation not found")
-    return d
+    if user.role == Role.admin or d.donor_id == user.id:
+        return d
+    if user.role == Role.rider and db.scalar(select(Job.id).where(Job.donation_id == d.id, Job.rider_id == user.id).limit(1)):
+        return d
+    raise api_error(404, "donation_not_found", "Donation not found")
 
 
 @router.get("/{donation_id}", response_model=DonationOut)
@@ -94,6 +102,40 @@ def cancel_donation(donation_id: uuid.UUID, user: User = Depends(donor_only), db
     if d.status not in CANCELLABLE:
         raise api_error(409, "cannot_cancel", "This donation can no longer be cancelled. Contact RAAZICID if needed")
     change_status(db, d, DonationStatus.cancelled, user, "Cancelled by donor")
+    db.commit()
+    db.refresh(d)
+    return donation_out(db, d)
+
+
+@router.get("/{donation_id}/tracking", response_model=TrackingOut)
+def track(donation_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Where the rider is now. The donor app and admin refresh this every 15 s."""
+    d = _get_visible(db, donation_id, user)
+    return tracking(db, d, current_job(db, d))
+
+
+@router.post("/{donation_id}/hand-out", response_model=DonationOut)
+def hand_out(donation_id: uuid.UUID, body: HandOutIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Our team handed the items to families at the point: the last step. Admin, or the rider who delivered it."""
+    d = _get_visible(db, donation_id, user)
+    job = current_job(db, d)
+    if user.role == Role.rider:
+        if job is None or job.rider_id != user.id or job.status != JobStatus.delivered:
+            raise api_error(403, "forbidden", "Only the rider who delivered it or an admin can record the hand-out")
+    elif user.role != Role.admin:
+        raise api_error(403, "forbidden", "Only the rider who delivered it or an admin can record the hand-out")
+    if d.status != DonationStatus.at_point:
+        raise api_error(409, "bad_status", "Record the hand-out after the donation reaches the point")
+    if body.quantity > d.quantity:
+        raise api_error(422, "too_many", f"This donation has {d.quantity} item(s)")
+    db.add(HandOut(donation_id=d.id, point_id=d.point_id, handed_out_by=user.id, quantity=body.quantity,
+                   families_served=body.families_served, photo_url=body.photo_url,
+                   note=(body.note or "").strip() or None))
+    if body.photo_url:
+        db.add(DonationImage(donation_id=d.id, kind=ImageKind.distribution_proof, url=body.photo_url, uploaded_by=user.id))
+    fam = body.families_served
+    summary = f"{body.quantity} handed out" + (f" to {fam} famil{'y' if fam == 1 else 'ies'}." if fam else ".")
+    change_status(db, d, DonationStatus.handed_out, user, summary)
     db.commit()
     db.refresh(d)
     return donation_out(db, d)

@@ -1,6 +1,6 @@
-import { useRoute } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Image, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Image, Linking, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { api, type Donation } from "../../api";
 import { Button, ErrorBox } from "../../components/ui";
 import { STATUS, dateTime, windowText } from "../../status";
@@ -9,6 +9,7 @@ import { colors, space } from "../../theme";
 /** One donation: photos, status, pickup, where it is going and its history. */
 export default function DonationDetailScreen() {
   const { params } = useRoute<any>() as { params: { id: string; justCreated?: boolean } };
+  const navigation = useNavigation<any>();
   const [d, setD] = useState<Donation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -101,6 +102,40 @@ export default function DonationDetailScreen() {
         {d.point ? <Row label="Going to" value={`${d.point.name}\n${d.point.location_path.slice(-2).join(", ")}`} /> : null}
       </View>
 
+      {d.job && (d.status === "rider_assigned" || d.status === "picked_up") ? (
+        <View style={st.card}>
+          <Text style={{ fontWeight: "800", color: colors.ink }}>Your rider: {d.job.rider_name}</Text>
+          <Text style={{ color: colors.muted }}>{d.job.vehicle}</Text>
+          <Button label="Track rider" onPress={() => navigation.navigate("Tracking", { id: d.id })} />
+          <Button label="Call rider" variant="outline" onPress={() => Linking.openURL(`tel:${d.job!.rider_phone}`)} />
+        </View>
+      ) : null}
+
+      {d.hand_out ? (
+        <View style={[st.banner, { backgroundColor: colors.primarySoft }]}>
+          <Text style={{ fontWeight: "800", color: colors.primaryDark }}>
+            Handed out{d.hand_out.families_served ? ` to ${d.hand_out.families_served} families` : ""}. Thank you!
+          </Text>
+          <Text style={{ color: colors.ink2 }}>
+            {d.hand_out.quantity} of {d.quantity} given out at {d.point?.name ?? "the distribution point"}.
+          </Text>
+        </View>
+      ) : null}
+
+      {d.proofs.length ? (
+        <>
+          <Text style={st.h2}>Proof photos</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
+            {d.proofs.map((p) => (
+              <View key={p.url + p.kind} style={{ gap: 4 }}>
+                <Image source={{ uri: p.url }} style={[st.photo, { width: 160, height: 120 }]} accessibilityLabel={PROOF[p.kind]} />
+                <Text style={{ fontSize: 12, color: colors.ink2, fontWeight: "600" }}>{PROOF[p.kind]}</Text>
+              </View>
+            ))}
+          </ScrollView>
+        </>
+      ) : null}
+
       <Text style={st.h2}>History</Text>
       <View style={st.card}>
         {d.history.map((h, i) => (
@@ -117,10 +152,11 @@ export default function DonationDetailScreen() {
 
       <ErrorBox message={error} />
       {d.can_cancel ? <Button label="Cancel donation" variant="danger" onPress={cancel} loading={cancelling} /> : null}
-      <Text style={{ fontSize: 12, color: colors.muted, textAlign: "center" }}>Live rider tracking arrives in Phase 4.</Text>
     </ScrollView>
   );
 }
+
+const PROOF = { pickup_proof: "Picked up from you", delivery_proof: "At the point", distribution_proof: "Handed out" } as const;
 
 function Row({ label, value }: { label: string; value: string }) {
   return (

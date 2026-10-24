@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { PageHeader } from "../components/Layout";
-import { api, type Donation, type PointOption } from "../lib/api";
+import { api, type Donation, type PointOption, type RiderOption } from "../lib/api";
 import { STATUS, dateTime, pointTypeLabel, urgencyChip, windowText } from "../lib/format";
+
+const PROOF = { pickup_proof: "Pickup", delivery_proof: "At the point", distribution_proof: "Hand-out" } as const;
 
 const MATCH: Record<PointOption["match"], string> = {
   same_area: "Same area",
@@ -23,11 +25,27 @@ export default function DonationDetail() {
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [zoom, setZoom] = useState<string | null>(null);
+  const [riders, setRiders] = useState<RiderOption[] | null>(null);
+  const [riderId, setRiderId] = useState("");
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelling, setCancelling] = useState(false);
+  const [hoQty, setHoQty] = useState("");
+  const [hoFamilies, setHoFamilies] = useState("");
+  const [hoNote, setHoNote] = useState("");
 
   const load = useCallback(() => {
     api<Donation>(`/donations/${id}`)
       .then((data) => {
         setD(data);
+        if (data.status === "accepted") {
+          api<RiderOption[]>(`/admin/donations/${id}/rider-options`)
+            .then((rs) => {
+              setRiders(rs);
+              setRiderId(rs[0]?.id ?? "");
+            })
+            .catch((e) => setError(e.message));
+        }
+        if (data.status === "at_point") setHoQty(String(data.quantity));
         if (data.status === "in_review") {
           api<PointOption[]>(`/admin/donations/${id}/point-options`)
             .then((opts) => {
@@ -64,6 +82,47 @@ export default function DonationDetail() {
       setD(out);
       setRejecting(false);
       setFlash("Rejected. The donor can see your reason in the app.");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const act = async (path: string, body: object, done: (out: Donation) => string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const out = await api<Donation>(`/admin/donations/${id}/${path}`, { method: "POST", body: JSON.stringify(body) });
+      setD(out);
+      setFlash(done(out));
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const assign = () => act("assign", { rider_id: riderId }, (out) => `Assigned to ${out.job?.rider_name}. The rider and donor have been told.`);
+
+  const cancelJob = () =>
+    act("cancel-job", { reason: cancelReason.trim() }, () => {
+      setCancelling(false);
+      setCancelReason("");
+      return "Job cancelled. Choose another rider.";
+    });
+
+  const handOut = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const out = await api<Donation>(`/donations/${id}/hand-out`, {
+        method: "POST",
+        body: JSON.stringify({ quantity: Number(hoQty), families_served: hoFamilies ? Number(hoFamilies) : null, note: hoNote.trim() || null }),
+      });
+      setD(out);
+      setFlash("Hand-out recorded. The donor has been told.");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -174,6 +233,42 @@ export default function DonationDetail() {
               </section>
             )}
 
+            {d.proofs.length > 0 && (
+              <section className="card">
+                <h2 style={{ margin: "0 0 10px", fontSize: 16 }}>Proof photos</h2>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 12 }}>
+                  {d.proofs.map((p) => (
+                    <figure key={p.url + p.kind} style={{ margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+                      <button onClick={() => setZoom(p.url)} aria-label={`Open ${PROOF[p.kind]}`} style={{ padding: 0, border: 0, background: "none", cursor: "zoom-in" }}>
+                        <img src={p.url} alt={PROOF[p.kind]} style={{ width: "100%", height: 120, objectFit: "cover", borderRadius: 10, display: "block" }} />
+                      </button>
+                      <figcaption className="small">
+                        <strong>{PROOF[p.kind]}</strong> · {dateTime(p.at)}
+                        {p.distance_km !== null && (
+                          <span className={`chip ${p.distance_km > 1 ? "bad" : "ok"}`} style={{ marginLeft: 6 }}>
+                            {p.distance_km > 1 ? `${p.distance_km} km away` : "At the right place"}
+                          </span>
+                        )}
+                      </figcaption>
+                    </figure>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {d.hand_out && (
+              <section className="card">
+                <h2 style={{ margin: "0 0 6px", fontSize: 16 }}>Hand-out</h2>
+                <p style={{ margin: 0 }}>
+                  <strong>{d.hand_out.quantity}</strong> of {d.quantity} handed out
+                  {d.hand_out.families_served ? <> to <strong>{d.hand_out.families_served}</strong> families</> : null} at {d.point?.name}.
+                </p>
+                <p className="muted small" style={{ margin: "4px 0 0" }}>
+                  Recorded by {d.hand_out.by_name} · {dateTime(d.hand_out.at)}{d.hand_out.note ? ` · ${d.hand_out.note}` : ""}
+                </p>
+              </section>
+            )}
+
             <section className="card">
               <h2 style={{ margin: "0 0 10px", fontSize: 16 }}>History</h2>
               <ol style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -247,8 +342,81 @@ export default function DonationDetail() {
               </>
             ) : d.status === "accepted" ? (
               <>
-                <h2 style={{ margin: 0, fontSize: 16 }}>Next: assign a rider</h2>
-                <p className="muted" style={{ margin: 0 }}>Rider assignment and live tracking arrive in Phase 4. The donor can still cancel until a rider is assigned.</p>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: 16 }}>Which rider?</h2>
+                  <p className="muted small" style={{ margin: "4px 0 0" }}>Approved riders: available first, then nearest (live GPS or home area), then fewest jobs. Scored recommendation comes in Phase 5.</p>
+                </div>
+                {riders === null ? (
+                  <p className="muted">Loading riders…</p>
+                ) : riders.length === 0 ? (
+                  <div className="flash bad">No approved riders yet. <Link to="/riders">Approve a rider</Link> first.</div>
+                ) : (
+                  <div role="radiogroup" aria-label="Rider" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {riders.map((r) => (
+                      <label key={r.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: 12, margin: 0, borderRadius: 10, cursor: "pointer", fontWeight: 400,
+                        border: riderId === r.id ? "2px solid var(--green-700)" : "1px solid var(--line-2)", background: riderId === r.id ? "var(--green-50)" : "#fff" }}>
+                        <input type="radio" name="rider" checked={riderId === r.id} onChange={() => setRiderId(r.id)} style={{ marginTop: 3 }} />
+                        <span style={{ flex: 1 }}>
+                          <strong style={{ color: "var(--ink)" }}>{r.full_name}</strong>
+                          <span className="muted small" style={{ display: "block" }}>{r.vehicle_type} {r.vehicle_number} · {r.phone}</span>
+                          <span className="small" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                            <span className={`chip ${r.is_available ? "ok" : "wait"}`}>{r.is_available ? "Available" : "Off duty"}</span>
+                            {r.distance_km !== null ? <span className="chip wait">{r.distance_km} km away</span> : <span className="chip wait">{MATCH[r.match]}</span>}
+                            <span className="chip wait">{r.active_jobs} active job{r.active_jobs === 1 ? "" : "s"}</span>
+                          </span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                <button className="btn" disabled={busy || !riderId} onClick={assign}>{busy ? "Saving…" : "Assign rider"}</button>
+                <p className="muted small" style={{ margin: 0 }}>The donor can still cancel until a rider is assigned.</p>
+              </>
+            ) : (d.status === "rider_assigned" || d.status === "picked_up") && d.job ? (
+              <>
+                <h2 style={{ margin: 0, fontSize: 16 }}>{d.status === "picked_up" ? "On the way to the point" : d.job.status === "assigned" ? "Waiting for the rider to accept" : "Rider going to pickup"}</h2>
+                <div>
+                  <strong>{d.job.rider_name}</strong>
+                  <div className="muted small">{d.job.vehicle} · {d.job.rider_phone} · assigned {dateTime(d.job.assigned_at)}</div>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <Link className="btn ghost small" to="/tracking">Live tracking</Link>
+                  <a className="btn ghost small" href={`tel:${d.job.rider_phone}`}>Call rider</a>
+                </div>
+                {d.status === "rider_assigned" && (
+                  !cancelling ? (
+                    <button className="btn danger" onClick={() => setCancelling(true)}>Take the job off this rider</button>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <label htmlFor="creason" style={{ margin: 0 }}>Reason (the rider sees this)</label>
+                      <textarea id="creason" className="input" style={{ height: 70, padding: 10 }} maxLength={500} value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="e.g. Not moving for 30 minutes" />
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button className="btn danger" disabled={busy || cancelReason.trim().length < 3} onClick={cancelJob}>Confirm</button>
+                        <button className="btn ghost" onClick={() => setCancelling(false)}>Back</button>
+                      </div>
+                    </div>
+                  )
+                )}
+              </>
+            ) : d.status === "at_point" ? (
+              <>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: 16 }}>Record the hand-out</h2>
+                  <p className="muted small" style={{ margin: "4px 0 0" }}>When our team gives the items to families at {d.point?.name}. The rider can also do this in the app.</p>
+                </div>
+                <div>
+                  <label htmlFor="hoq">How many were handed out? (of {d.quantity})</label>
+                  <input id="hoq" className="input" type="number" min={1} max={d.quantity} value={hoQty} onChange={(e) => setHoQty(e.target.value)} />
+                </div>
+                <div>
+                  <label htmlFor="hof">How many families?</label>
+                  <input id="hof" className="input" type="number" min={0} value={hoFamilies} onChange={(e) => setHoFamilies(e.target.value)} placeholder="e.g. 8" />
+                </div>
+                <div>
+                  <label htmlFor="hon">Note (optional)</label>
+                  <input id="hon" className="input" value={hoNote} onChange={(e) => setHoNote(e.target.value)} placeholder="e.g. Given after Jumma prayers" />
+                </div>
+                <button className="btn" disabled={busy || !hoQty || Number(hoQty) < 1} onClick={handOut}>{busy ? "Saving…" : "Save hand-out"}</button>
               </>
             ) : (
               <>

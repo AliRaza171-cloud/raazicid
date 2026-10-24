@@ -154,6 +154,34 @@ class Pickup(BaseModel):
     to: Optional[datetime]
 
 
+class ProofPhoto(BaseModel):
+    kind: Literal["pickup_proof", "delivery_proof", "distribution_proof"]
+    url: str
+    lat: Optional[float]
+    lng: Optional[float]
+    distance_km: Optional[float]   # from where it should have been taken (pickup address / point)
+    at: datetime
+
+
+class HandOutRef(BaseModel):
+    quantity: int
+    families_served: Optional[int]
+    photo_url: Optional[str]
+    note: Optional[str]
+    by_name: str
+    at: datetime
+
+
+class JobRef(BaseModel):
+    id: uuid.UUID
+    status: str
+    rider_id: uuid.UUID
+    rider_name: str
+    rider_phone: str
+    vehicle: str
+    assigned_at: datetime
+
+
 class DonationOut(DonationListItem):
     description: Optional[str]
     condition: Optional[Condition]
@@ -168,6 +196,9 @@ class DonationOut(DonationListItem):
     donor: DonorRef
     ai: Optional[AiSuggestion]
     can_cancel: bool
+    job: Optional[JobRef] = None          # current rider job (Phase 4)
+    proofs: list[ProofPhoto] = []
+    hand_out: Optional[HandOutRef] = None
 
 
 class DonationCounts(BaseModel):

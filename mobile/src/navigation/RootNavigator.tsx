@@ -18,6 +18,7 @@ import NeedsScreen from "../screens/donor/NeedsScreen";
 import TrackingScreen from "../screens/donor/TrackingScreen";
 import ProfileScreen from "../screens/ProfileScreen";
 import ActiveJobScreen from "../screens/rider/ActiveJobScreen";
+import HandOutScreen from "../screens/rider/HandOutScreen";
 import HistoryScreen from "../screens/rider/HistoryScreen";
 import JobsScreen from "../screens/rider/JobsScreen";
 import PendingScreen from "../screens/rider/PendingScreen";
@@ -90,7 +91,8 @@ export default function RootNavigator() {
     return (
       <Stack.Navigator>
         <Stack.Screen name="RiderTabs" component={RiderTabs} options={{ headerShown: false }} />
-        <Stack.Screen name="Proof" component={ProofScreen} options={{ title: "Confirm delivery" }} />
+        <Stack.Screen name="Proof" component={ProofScreen} options={{ title: "Proof" }} />
+        <Stack.Screen name="HandOut" component={HandOutScreen} options={{ title: "Hand-out" }} />
       </Stack.Navigator>
     );
   }

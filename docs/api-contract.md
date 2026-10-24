@@ -174,21 +174,41 @@ the Phase 4 rider steps).
 
 A point is open when `is_active` is true and `closes_at` (for temporary relief camps) has not passed.
 
-## Jobs, tracking, hand-out [Phase 4]
+## Jobs, tracking, hand-out [Phase 4, built]
 
 | Method | Path | Who | What |
 |---|---|---|---|
-| POST | `/admin/donations/{id}/assign` | admin | `{ "rider_id": "…" }` → creates job |
-| GET | `/rider/jobs?status=assigned\|active` | rider | My jobs |
-| POST | `/rider/jobs/{id}/accept` · `/decline` | rider | Decline takes `{ "reason": "…" }` |
-| POST | `/rider/jobs/{id}/pickup` | rider | `{ "photo_url", "lat", "lng" }` |
-| POST | `/rider/jobs/{id}/deliver` | rider | `{ "photo_url", "lat", "lng", "received_by" }` |
-| POST | `/rider/location` | rider | `{ "job_id", "lat", "lng", "recorded_at" }` every 15 s |
-| POST | `/rider/availability` | rider | `{ "is_available": true }` |
-| GET | `/donations/{id}/tracking` | donor, admin | Latest rider position, route, ETA |
-| GET | `/admin/tracking/active` | admin | All active jobs for the live map |
-| POST | `/donations/{id}/hand-out` | rider, admin | `{ "quantity", "families_served", "photo_url", "note" }` → `handed_out` |
-| GET | `/notifications` · POST `/notifications/read` | logged in | Inbox, mark read |
+| GET | `/admin/donations/{id}/rider-options` | admin | Approved riders: available first, then nearest (live GPS, else home area), then fewest active jobs |
+| POST | `/admin/donations/{id}/assign` | admin | `{ "rider_id": "…" }` → job `assigned`, donation `rider_assigned` |
+| POST | `/admin/donations/{id}/cancel-job` | admin | `{ "reason": "…" }`, only before pickup → donation back to `accepted` |
+| GET | `/admin/tracking` | admin | Every active job with the rider's last GPS point and `stalled` |
+| GET | `/rider/summary` | approved rider | Availability, active jobs, done today / total, rating |
+| PATCH | `/rider/availability` | approved rider | `{ "is_available": true }` |
+| GET | `/rider/jobs?filter=current\|history` | approved rider | Current = assigned, accepted, picked up, and delivered jobs still waiting for their hand-out |
+| GET | `/rider/jobs/{id}` | the rider | One job |
+| POST | `/rider/jobs/{id}/accept` | the rider | `assigned` → `accepted`. The donor's phone is shown after this |
+| POST | `/rider/jobs/{id}/decline` | the rider | `{ "reason": "…" }`, before pickup → donation back to `accepted`, admins notified |
+| POST | `/rider/jobs/{id}/pickup` | the rider | `{ "photo_url", "lat", "lng", "note"? }` → job and donation `picked_up` |
+| POST | `/rider/jobs/{id}/deliver` | the rider | `{ "photo_url", "lat", "lng", "note"? }` → job `delivered`, donation `at_point` |
+| POST | `/rider/jobs/{id}/ping` | the rider | `{ "lat", "lng" }` about every 15 s while the job screen is open (204) |
+| GET | `/donations/{id}/tracking` | donor, admin, the rider | Rider, last GPS point, path (last 240 points), `stalled`, pickup and point |
+| POST | `/donations/{id}/hand-out` | admin, the rider who delivered | `{ "quantity", "families_served"?, "photo_url"?, "note"? }` → `handed_out` |
+
+The donation detail (`GET /donations/{id}`) now also has `job` (current rider), `proofs`
+(pickup / delivery / hand-out photos with GPS and `distance_km` from where they should be) and
+`hand_out`.
+
+**Checks**
+- Proof photos are taken with the camera, with GPS. A pickup photo more than 1 km from the pickup
+  address raises a `far_from_pickup` flag (medium), and a delivery photo more than 1 km from the point
+  raises `far_from_point` (high). The step still goes through; an admin reviews the flag (Phase 8 page).
+- `stalled`: no GPS for 10+ minutes on an accepted or picked-up job.
+- Hand-out quantity cannot be more than the donation's quantity.
+- GPS is shared only while the rider's job screen is open (Expo Go has no background location).
+
+Notifications are saved for the donor at every step (assigned, picked up, at point, handed out),
+for the rider (new job, job taken off), and for admins (rider declined). The inbox screen and
+`GET /notifications` come with the alerts in Phase 6.
 
 ## AI suggestions [Phase 5]
 

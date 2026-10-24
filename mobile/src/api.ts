@@ -191,4 +191,77 @@ export interface Donation extends DonationListItem {
   photos: string[];
   history: { from_status: DonationStatus | null; to_status: DonationStatus; note: string | null; by_name: string | null; at: string }[];
   can_cancel: boolean;
+  job: { id: string; status: JobStatus; rider_id: string; rider_name: string; rider_phone: string; vehicle: string; assigned_at: string } | null;
+  proofs: { kind: "pickup_proof" | "delivery_proof" | "distribution_proof"; url: string; lat: number | null; lng: number | null; distance_km: number | null; at: string }[];
+  hand_out: { quantity: number; families_served: number | null; photo_url: string | null; note: string | null; by_name: string; at: string } | null;
+}
+
+export type JobStatus = "assigned" | "accepted" | "declined" | "picked_up" | "delivered" | "cancelled";
+
+export interface Place {
+  name: string | null;
+  address: string;
+  lat: number;
+  lng: number;
+  area: string[];
+  contact_name: string | null;
+  contact_phone: string | null;
+}
+
+export interface Job {
+  id: string;
+  status: JobStatus;
+  assigned_at: string;
+  accepted_at: string | null;
+  picked_up_at: string | null;
+  delivered_at: string | null;
+  decline_reason: string | null;
+  donation_id: string;
+  donation_ref: string;
+  donation_status: DonationStatus;
+  title: string;
+  category: string;
+  quantity: number;
+  description: string | null;
+  is_food: boolean;
+  food_type: "cooked" | "dry" | null;
+  prepared_at: string | null;
+  urgency_score: number | null;
+  photos: string[];
+  pickup: Place;
+  pickup_from: string | null;
+  pickup_to: string | null;
+  point: Place | null;
+  donor_name: string;
+  donor_phone: string | null;
+  trip_km: number | null;
+  can_hand_out: boolean;
+}
+
+export interface RiderSummary {
+  is_available: boolean;
+  active_jobs: number;
+  done_today: number;
+  done_total: number;
+  rating_avg: number | null;
+}
+
+export interface LatLngAt {
+  lat: number;
+  lng: number;
+  at: string;
+}
+
+export interface Tracking {
+  donation_id: string;
+  donation_status: DonationStatus;
+  job_id: string | null;
+  job_status: JobStatus | null;
+  heading_to: "pickup" | "point" | null;
+  rider: { full_name: string; phone: string; vehicle_type: string; vehicle_number: string } | null;
+  last: LatLngAt | null;
+  path: LatLngAt[];
+  stalled: boolean;
+  pickup: Place;
+  point: Place | null;
 }

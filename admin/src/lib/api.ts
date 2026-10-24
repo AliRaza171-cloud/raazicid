@@ -202,6 +202,67 @@ export interface Donation extends DonationItem {
   donor: { id: string; full_name: string; phone: string; donations_count: number };
   ai: { category_id: number; confidence: number; top3: { category_id: number; p: number }[] } | null;
   can_cancel: boolean;
+  job: { id: string; status: JobStatus; rider_id: string; rider_name: string; rider_phone: string; vehicle: string; assigned_at: string } | null;
+  proofs: { kind: "pickup_proof" | "delivery_proof" | "distribution_proof"; url: string; lat: number | null; lng: number | null; distance_km: number | null; at: string }[];
+  hand_out: { quantity: number; families_served: number | null; photo_url: string | null; note: string | null; by_name: string; at: string } | null;
+}
+
+export type JobStatus = "assigned" | "accepted" | "declined" | "picked_up" | "delivered" | "cancelled";
+
+export interface RiderOption {
+  id: string;
+  full_name: string;
+  phone: string;
+  vehicle_type: string;
+  vehicle_number: string;
+  is_available: boolean;
+  active_jobs: number;
+  match: "same_area" | "same_region" | "same_city" | "same_province" | "other";
+  distance_km: number | null;
+  last_seen_at: string | null;
+  rating_avg: number | null;
+}
+
+export interface Place {
+  name: string | null;
+  address: string;
+  lat: number;
+  lng: number;
+  area: string[];
+  contact_name: string | null;
+  contact_phone: string | null;
+}
+
+export interface LatLngAt {
+  lat: number;
+  lng: number;
+  at: string;
+}
+
+export interface TrackingItem {
+  job_id: string;
+  job_status: JobStatus;
+  donation_id: string;
+  donation_ref: string;
+  title: string;
+  rider_name: string;
+  rider_phone: string;
+  heading_to: "pickup" | "point";
+  last: LatLngAt | null;
+  minutes_since_ping: number | null;
+  stalled: boolean;
+  pickup: Place;
+  point: Place | null;
+}
+
+export interface Tracking {
+  job_status: JobStatus | null;
+  heading_to: "pickup" | "point" | null;
+  last: LatLngAt | null;
+  path: LatLngAt[];
+  stalled: boolean;
+  pickup: Place;
+  point: Place | null;
 }
 
 export interface PointOption {
