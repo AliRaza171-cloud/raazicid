@@ -332,7 +332,10 @@ and need levels without a written answer.
 { "question": "Where in Karachi are blankets needed most this winter?", "location_id": "<karachi>", "category_id": 4,
   "web_search": false }
 // 200
-{ "answer": "Lyari stands out: families sleep without blankets as nights get colder [S1]. …",
+{ "summary": "Lyari needs blankets most: families sleep without them as nights get colder [S1].",
+  "points": ["About half the families visited had no blanket [S1]", "Our data shows high need for winter items [D1]"],
+  "note": "The reports cover Karachi only.",
+  "answer": "summary + points as one text (older clients)",
   "confidence": "medium", "ai": true, "used_web": false,
   "areas": [{ "name": "Lyari", "need": "urgent", "categories": ["Blankets"], "reason": "… [S1]", "sources": ["S1"],
               "location_id": "…", "path": ["Sindh", "Karachi", "Karachi South", "Lyari"], "our_level": 2 }],

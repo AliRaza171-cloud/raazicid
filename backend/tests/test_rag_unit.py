@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from app.services.rag.finder import _cited, build_prompt
+from app.services.rag.finder import _cited, build_prompt, tidy
 from app.services.rag.search import Hit, keywords, rrf
 from app.services.rag.text import chunk_pages, clean, html_text
 
@@ -64,3 +64,11 @@ def test_prompt_numbers_sources_and_facts():
 
 def test_citations_found():
     assert _cited("Tharparkar needs food [S1] and blankets [D2][S3]. Not [X1] or [S].") == {"S1", "D2", "S3"}
+
+
+def test_web_cite_tags_become_plain_markers():
+    raw = "<cite index='2-1,2-10'>Rawalpindi had a 40% shortage of textbooks.</cite> <cite index='7-1'>Lahore too</cite>."
+    assert tidy(raw) == "Rawalpindi had a 40% shortage of textbooks. [Web] Lahore too. [Web]"
+    assert tidy("<cite index='8-1'>Free textbooks were late</cite>, so parents paid more.") == "Free textbooks were late, [Web] so parents paid more."
+    assert tidy("Lyari needs blankets [S1]. <b>bold</b>  text") == "Lyari needs blankets [S1]. bold text"
+    assert "<" not in tidy("<cite index='5-3'>Prices up to 300%</cite><cite index='5-4'> higher</cite> in Islamabad [S2].")

@@ -31,18 +31,38 @@ clothes, blankets, winter items, hygiene kits, baby items, household items, scho
 emergency relief) and hands them out through its own distribution points and relief camps.
 
 Answer the admin's question using ONLY the sources given (and web search results if you search).
-- Every factual sentence must cite its source in square brackets, e.g. [S2] or [D1]. Web facts are cited automatically.
+
+Write for a busy charity worker, not an expert:
+- Short sentences and everyday words. No jargon: say "food crisis level" instead of "IPC Phase 3+".
+- Start with one plain sentence that answers the question. Then at most 4 short points.
+- Every point ends with its source in square brackets: [S2] for a library passage, [D1] for our need levels,
+  [Web] for something you found with web search. Do not use <cite> tags or any other markup.
 - Never invent numbers, places or dates. If the sources do not answer the question, say so plainly.
-- Prefer recent sources. Mention the date when it matters.
-- Name specific districts, cities or areas in Pakistan wherever the sources allow.
-- Keep the answer short: 3 to 6 sentences, plain English."""
+- Prefer recent sources and say when they are old (for example "reports from April").
+- Name specific districts or cities in Pakistan wherever the sources allow."""
 
 FORMAT = """Reply with JSON only, inside ```json fences:
-{"answer": "short answer with [S1]-style citations",
- "areas": [{"name": "district / city / area in Pakistan", "need": "urgent | high | some",
-            "categories": ["Blankets", "Food"], "reason": "one sentence with citations", "sources": ["S1", "D2"]}],
+{"summary": "one plain sentence that answers the question",
+ "points": ["short point with its source, e.g. Rawalpindi is short of 40% of new textbooks [S1]"],
+ "areas": [{"name": "district or city in Pakistan", "need": "urgent | high | some",
+            "categories": ["School supplies", "Books"], "reason": "one short sentence with its source", "sources": ["S1", "D2"]}],
+ "note": "one short sentence on what the sources do not cover, or empty",
  "confidence": "low | medium | high"}
-List at most 6 areas, most needed first. Use an empty list if the sources name no areas."""
+At most 4 points and 5 areas, most needed first. Use the category names RAAZICID uses. Empty lists if nothing fits."""
+
+CITE_TAG = re.compile(r"<cite\b[^>]*>(.*?)</cite>", re.S | re.I)
+
+
+def tidy(text: str) -> str:
+    """Plain text: web-search <cite> tags become a [Web] marker, other markup is removed, spaces tidied."""
+    text = CITE_TAG.sub(lambda m: m.group(1) + "\x00", str(text or ""))
+    text = re.sub(r"\x00(?=\s*[a-z0-9(%])", "", text)              # mid-sentence: the marker waits for the clause end
+    text = text.replace("\x00", " [Web]")
+    text = re.sub(r"</?[a-zA-Z][^>]*>", "", text)
+    text = re.sub(r"(\s*\[Web\])+", " [Web]", text)              # one marker is enough
+    text = re.sub(r"\[Web\]([.,;:])", r"\1 [Web]", text)          # marker after the full stop reads better
+    text = re.sub(r"\s+([.,;:])", r"\1", text)
+    return re.sub(r"\s{2,}", " ", text).strip()
 
 
 def _fmt_date(d: Optional[datetime]) -> str:
@@ -147,8 +167,8 @@ def find_needs(db: Session, question: str, location_id: Optional[uuid.UUID] = No
             "facts": facts, "web_results": [], "used_web": False, "model": settings.CLAUDE_MODEL}
 
     if not settings.ANTHROPIC_API_KEY:
-        return {**base, "answer": "Claude is not set up (add ANTHROPIC_API_KEY), so here are the most relevant passages and "
-                                  "our need levels without a written answer.", "areas": [], "confidence": "low", "ai": False}
+        msg = "Claude is not set up (add ANTHROPIC_API_KEY), so here are the most relevant passages and our need levels."
+        return {**base, "answer": msg, "summary": msg, "points": [], "note": "", "areas": [], "confidence": "low", "ai": False}
 
     tools = None
     if web_search:
@@ -160,24 +180,35 @@ def find_needs(db: Session, question: str, location_id: Optional[uuid.UUID] = No
         res = ask_complete([{"role": "user", "content": build_prompt(question, place, cat_name, hits, facts, web_search)}],
                   system=SYSTEM, tools=tools, max_tokens=2000, timeout=150)
     except ClaudeError as e:
-        return {**base, "answer": f"Claude could not answer just now ({e}). The passages and need levels below are still useful.",
-                "areas": [], "confidence": "low", "ai": False}
+        msg = f"Claude could not answer just now ({e}). The passages and need levels below are still useful."
+        return {**base, "answer": msg, "summary": msg, "points": [], "note": "", "areas": [], "confidence": "low", "ai": False}
 
     text, cites = text_and_citations(res)
     try:
-        data = extract_json(text)
+        data = extract_json(CITE_TAG.sub(lambda m: m.group(1), text))
         if not isinstance(data, dict):
             raise ValueError
     except ValueError:
-        data = {"answer": text.strip()[:3000], "areas": [], "confidence": "low"}
+        data = {"summary": tidy(text)[:600], "points": [], "areas": [], "confidence": "low"}
 
-    answer = str(data.get("answer") or "").strip()
-    used = _cited(answer) | {s for a in data.get("areas") or [] if isinstance(a, dict) for s in (a.get("sources") or []) if isinstance(s, str)}
+    summary = tidy(data.get("summary") or data.get("answer") or "")
+    points = [tidy(p) for p in (data.get("points") or []) if isinstance(p, str) and p.strip()][:4]
+    note = tidy(data.get("note") or "")
+    areas = []
+    for a in (data.get("areas") or [])[:5]:
+        if isinstance(a, dict):
+            areas.append({**a, "name": tidy(a.get("name", "")), "reason": tidy(a.get("reason", "")),
+                          "categories": [tidy(c) for c in a.get("categories") or [] if isinstance(c, str)]})
+    answer = " ".join([summary, *points]).strip()
+    used = _cited(answer) | {s for a in areas for s in (a.get("sources") or []) if isinstance(s, str)} | {x for a in areas for x in _cited(a["reason"])}
     for s in sources:
         s["cited"] = s["id"] in used
     return {**base,
             "answer": answer,
-            "areas": match_areas(db, data.get("areas") or [], category_id),
+            "summary": summary,
+            "points": points,
+            "note": note,
+            "areas": match_areas(db, areas, category_id),
             "confidence": data.get("confidence") if data.get("confidence") in ("low", "medium", "high") else "medium",
             "web_results": [{"url": c["url"], "title": c["title"], "snippet": c.get("cited_text", "")[:300]} for c in cites],
             "used_web": bool(web_search),

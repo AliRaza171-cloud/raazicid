@@ -477,6 +477,9 @@ export interface FinderAnswer {
   place: string | null;
   category: string | null;
   answer: string;
+  summary: string;      // one plain sentence
+  points: string[];     // up to 4 short points, each with [S1] / [D1] / [Web]
+  note: string;         // what the sources do not cover
   areas: FinderArea[];
   confidence: "low" | "medium" | "high";
   sources: FinderSource[];

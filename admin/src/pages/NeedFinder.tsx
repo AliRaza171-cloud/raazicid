@@ -1,10 +1,10 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import AppealForm from "../components/AppealForm";
 import { PageHeader } from "../components/Layout";
 import LocationSelect from "../components/LocationSelect";
 import { api, type Category, type FinderAnswer, type FinderArea } from "../lib/api";
-import { LEVELS, date } from "../lib/format";
+import { date } from "../lib/format";
 
 const EXAMPLES = [
   "Where are blankets and winter clothes needed most this winter?",
@@ -13,7 +13,19 @@ const EXAMPLES = [
   "Which areas need hygiene kits for women and children?",
 ];
 
-const NEED_CHIP: Record<string, string> = { urgent: "lv3", high: "lv2", some: "lv1" };
+const NEED: Record<string, { label: string; cls: string }> = {
+  urgent: { label: "Urgent need", cls: "lv3" },
+  high: { label: "High need", cls: "lv2" },
+  some: { label: "Some need", cls: "lv1" },
+};
+
+/** Does our own data (needs by area) agree with what the reports say? Plain words for the admin. */
+function ourData(level: number | null): { text: string; color: string } {
+  if (level === null) return { text: "Not in our places list", color: "var(--muted)" };
+  if (level >= 2) return { text: "Our data agrees", color: "#0b5e50" };
+  if (level === 1) return { text: "Our data shows some need", color: "var(--warn)" };
+  return { text: "Not in our data yet", color: "var(--muted)" };
+}
 
 export default function NeedFinder() {
   const [cats, setCats] = useState<Category[]>([]);
@@ -24,7 +36,8 @@ export default function NeedFinder() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [res, setRes] = useState<FinderAnswer | null>(null);
-  const [focus, setFocus] = useState<string | null>(null);     // a source id like S2 / D1
+  const [focus, setFocus] = useState<string | null>(null);     // a source id like S2 / D1, or "Web"
+  const [showSources, setShowSources] = useState(false);
   const [appealFor, setAppealFor] = useState<FinderArea | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
 
@@ -38,6 +51,7 @@ export default function NeedFinder() {
     setBusy(true);
     setError(null);
     setFocus(null);
+    setShowSources(false);
     setAppealFor(null);
     try {
       setRes(await api<FinderAnswer>("/admin/need-finder/ask", {
@@ -51,16 +65,22 @@ export default function NeedFinder() {
     }
   };
 
-  /** "Lyari needs blankets [S1][D2]." with clickable citation chips */
+  const openSource = (id: string) => {
+    setShowSources(true);
+    setFocus(focus === id ? null : id);
+  };
+
+  /** "Lyari needs blankets [S1] [Web]" with small clickable source chips */
   const cite = (text: string): ReactNode[] =>
-    text.split(/(\[(?:S|D)\d+\])/g).map((part, i) => {
-      const m = part.match(/^\[((?:S|D)\d+)\]$/);
+    text.split(/(\[(?:S\d+|D\d+|Web)\])/g).map((part, i) => {
+      const m = part.match(/^\[(S\d+|D\d+|Web)\]$/);
       if (!m) return <span key={i}>{part}</span>;
+      const on = focus === m[1];
       return (
-        <button key={i} onClick={() => setFocus(m[1])} title="Show this source"
-          style={{ border: 0, borderRadius: 6, padding: "0 5px", margin: "0 1px", fontSize: 11, fontWeight: 800, cursor: "pointer",
-                   background: focus === m[1] ? "var(--green-700)" : "var(--green-50)", color: focus === m[1] ? "#fff" : "#0b5e50" }}>
-          {m[1]}
+        <button key={i} onClick={() => openSource(m[1])} title={m[1] === "Web" ? "Found on the web" : m[1].startsWith("D") ? "Our need data" : "A report in the library"}
+          style={{ border: 0, borderRadius: 6, padding: "0 5px", margin: "0 1px", fontSize: 10, fontWeight: 800, cursor: "pointer", verticalAlign: 1,
+                   background: on ? "var(--green-700)" : "#eef0ec", color: on ? "#fff" : "#46504b" }}>
+          {m[1] === "Web" ? "web" : m[1]}
         </button>
       );
     });
@@ -96,94 +116,115 @@ export default function NeedFinder() {
         {flash && <div className="flash ok" role="status">{flash}</div>}
 
         {res && (
-          <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
-            <div style={{ flex: "2 1 520px", display: "flex", flexDirection: "column", gap: 16 }}>
-              <section className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                  <h2 style={{ margin: 0, fontSize: 16, marginRight: "auto" }}>Answer</h2>
-                  {res.ai && <span className={`chip ${res.confidence === "high" ? "ok" : res.confidence === "medium" ? "info" : "warn"}`}>Confidence: {res.confidence}</span>}
-                  <span className="chip wait">{res.ai ? `Claude · ${res.sources.length} passages${res.used_web ? " · web" : ""}` : "Library only"}</span>
-                </div>
-                <p style={{ margin: 0, fontSize: 15, lineHeight: 1.55 }}>{cite(res.answer)}</p>
-                {res.place && <span className="muted small">Place: {res.place}{res.category ? ` · ${res.category}` : ""}</span>}
-              </section>
-
-              {res.areas.length > 0 && (
-                <section style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <h2 style={{ margin: 0, fontSize: 16 }}>Areas</h2>
-                  {res.areas.map((a, i) => (
-                    <div key={i} className="card" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                        <span className={`chip ${NEED_CHIP[a.need]}`}>{a.need[0].toUpperCase() + a.need.slice(1)}</span>
-                        <strong style={{ fontSize: 16 }}>{a.name}</strong>
-                        <span className="muted small">{a.path.length ? a.path.join(" › ") : "Not in our places list"}</span>
-                        {a.our_level !== null && <span className={`chip lv${a.our_level}`} title="Level from our own data (needs by area)" style={{ marginLeft: "auto" }}>Our data: {LEVELS[a.our_level].label}</span>}
-                      </div>
-                      {a.categories.length > 0 && <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>{a.categories.map((c) => <span key={c} className="chip wait">{c}</span>)}</div>}
-                      <div>{cite(a.reason)}</div>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        {a.location_id && <button className="btn small" onClick={() => setAppealFor(a)}>Send an appeal</button>}
-                        <Link className="btn ghost small" to="/needs">Needs by area</Link>
-                        <Link className="btn ghost small" to="/points">Add a distribution point</Link>
-                      </div>
-                      {appealFor === a && a.location_id && (
-                        <AppealForm cats={cats}
-                          defaults={{ title: `${a.categories[0] ?? "Help"} needed in ${a.name}`, message: a.reason.replace(/\s*\[(?:S|D)\d+\]/g, ""),
-                                      locationId: a.location_id, locationPath: a.path, categoryIds: catIds(a.categories) }}
-                          onCancel={() => setAppealFor(null)}
-                          onSent={(ap) => { setAppealFor(null); setFlash(`Appeal sent to ${ap.reached} donors in ${ap.provinces.join(", ")}`); }} />
-                      )}
-                    </div>
-                  ))}
-                </section>
+          <>
+            <section className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }} aria-label="Answer">
+              <p style={{ margin: 0, fontSize: 19, fontWeight: 700, lineHeight: 1.4 }}>{cite(res.summary || res.answer)}</p>
+              {res.points.length > 0 && (
+                <ul style={{ margin: 0, paddingLeft: 20, display: "flex", flexDirection: "column", gap: 6, fontSize: 15, lineHeight: 1.5 }}>
+                  {res.points.map((pt, i) => <li key={i}>{cite(pt)}</li>)}
+                </ul>
               )}
-            </div>
+              {res.note && <p className="muted" style={{ margin: 0, fontSize: 14 }}>Not covered: {res.note}</p>}
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+                <span className="muted small">
+                  Based on {res.sources.length} report passage{res.sources.length === 1 ? "" : "s"}
+                  {res.facts.length ? ", our need data" : ""}{res.web_results.length ? ` and ${res.web_results.length} web page${res.web_results.length === 1 ? "" : "s"}` : ""}
+                  {res.ai ? ` · how sure: ${res.confidence}` : ""}
+                </span>
+                <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={() => setShowSources(!showSources)}>
+                  {showSources ? "Hide sources" : "Show sources"}
+                </button>
+              </div>
+            </section>
 
-            <aside style={{ flex: "1 1 340px", display: "flex", flexDirection: "column", gap: 12 }}>
-              <section className="card" style={{ padding: 0 }}>
-                <h2 style={{ margin: 0, fontSize: 16, padding: "14px 16px 6px" }}>Library passages</h2>
-                {res.sources.length === 0 && <p className="muted small" style={{ padding: "0 16px 14px", margin: 0 }}>Nothing in the library matched. Upload reports in the Report library.</p>}
+            {res.areas.length > 0 && (
+              <section className="card" style={{ padding: 0 }} aria-label="Where to help">
+                <h2 style={{ margin: 0, fontSize: 16, padding: "14px 18px 4px" }}>Where to help</h2>
+                <table className="table">
+                  <thead><tr><th>Place</th><th>Need</th><th>What is needed</th><th>Why</th><th /></tr></thead>
+                  <tbody>
+                    {res.areas.map((a, i) => {
+                      const od = ourData(a.our_level);
+                      return (
+                        <Fragment key={i}>
+                          <tr>
+                            <td style={{ whiteSpace: "nowrap" }}>
+                              <strong>{a.name}</strong>
+                              {a.path.length > 1 && <div className="muted small">{a.path.slice(0, -1).join(" › ")}</div>}
+                            </td>
+                            <td style={{ whiteSpace: "nowrap" }}>
+                              <span className={`chip ${NEED[a.need]?.cls ?? "lv1"}`}>{NEED[a.need]?.label ?? "Some need"}</span>
+                              <div className="small" style={{ color: od.color, marginTop: 4 }}>{od.text}</div>
+                            </td>
+                            <td>{a.categories.join(", ") || "–"}</td>
+                            <td style={{ maxWidth: 420 }}>{cite(a.reason)}</td>
+                            <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                              {a.location_id && <button className="btn small" onClick={() => setAppealFor(appealFor === a ? null : a)}>Send appeal</button>}
+                            </td>
+                          </tr>
+                          {appealFor === a && a.location_id && (
+                            <tr>
+                              <td colSpan={5}>
+                                <AppealForm cats={cats}
+                                  defaults={{ title: `${a.categories[0] ?? "Help"} needed in ${a.name}`, message: a.reason.replace(/\s*\[(?:S\d+|D\d+|Web)\]/g, ""),
+                                              locationId: a.location_id, locationPath: a.path, categoryIds: catIds(a.categories) }}
+                                  onCancel={() => setAppealFor(null)}
+                                  onSent={(ap) => { setAppealFor(null); setFlash(`Appeal sent to ${ap.reached} donors in ${ap.provinces.join(", ")}`); }} />
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div style={{ display: "flex", gap: 8, padding: "0 18px 14px" }}>
+                  <Link className="btn ghost small" to="/needs">Open needs by area</Link>
+                  <Link className="btn ghost small" to="/points">Add a distribution point</Link>
+                </div>
+              </section>
+            )}
+
+            {showSources && (
+              <section className="card" style={{ padding: 0 }} aria-label="Sources">
+                <h2 style={{ margin: 0, fontSize: 16, padding: "14px 18px 4px" }}>Where this comes from</h2>
+                {res.sources.length === 0 && res.facts.length === 0 && res.web_results.length === 0 && (
+                  <p className="muted small" style={{ padding: "0 18px 14px", margin: 0 }}>No sources. Upload reports in the Report library.</p>
+                )}
                 {res.sources.map((s) => (
-                  <div key={s.id} style={{ borderTop: "1px solid var(--line)", padding: "10px 16px", background: focus === s.id ? "var(--green-50)" : undefined }}>
-                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <button onClick={() => setFocus(focus === s.id ? null : s.id)} className={`chip ${s.cited ? "solid" : "wait"}`} style={{ border: 0, cursor: "pointer" }}>{s.id}</button>
-                      <strong style={{ fontSize: 14 }}>{s.title}</strong>
-                    </div>
-                    <div className="muted small">
-                      {s.publisher}{s.date ? ` · ${date(s.date)}` : ""}{s.page ? ` · page ${s.page}` : ""} · found by {s.found_by.join(" + ") || "search"}
-                      {s.places.length ? ` · ${s.places.join(", ")}` : ""}
-                    </div>
-                    {focus === s.id && <p style={{ fontSize: 13, whiteSpace: "pre-wrap", margin: "8px 0 0" }}>{s.text}</p>}
-                    {focus === s.id && s.url && <a className="small" href={s.url} target="_blank" rel="noreferrer">Open the original</a>}
+                  <div key={s.id} style={{ borderTop: "1px solid var(--line)", padding: "10px 18px", background: focus === s.id ? "var(--green-50)" : undefined }}>
+                    <button onClick={() => setFocus(focus === s.id ? null : s.id)} style={{ border: 0, background: "none", padding: 0, font: "inherit", cursor: "pointer", textAlign: "left" }}>
+                      <span className={`chip ${s.cited ? "solid" : "wait"}`}>{s.id}</span> <strong>{s.title}</strong>
+                      <span className="muted small"> · {s.publisher}{s.date ? `, ${date(s.date)}` : ""}{s.page ? `, page ${s.page}` : ""}</span>
+                    </button>
+                    {focus === s.id && (
+                      <>
+                        <p style={{ fontSize: 13, whiteSpace: "pre-wrap", margin: "8px 0 4px" }}>{s.text}</p>
+                        <span className="muted small">Found by {s.found_by.join(" + ") || "search"}{s.places.length ? ` · about ${s.places.join(", ")}` : ""}</span>
+                        {s.url && <> · <a className="small" href={s.url} target="_blank" rel="noreferrer">Open the original</a></>}
+                      </>
+                    )}
                   </div>
                 ))}
+                {res.facts.map((f) => (
+                  <div key={f.id} style={{ borderTop: "1px solid var(--line)", padding: "10px 18px", background: focus === f.id ? "var(--green-50)" : undefined }}>
+                    <span className="chip wait">{f.id}</span> <strong>Our data:</strong> {f.category} need is <strong>{f.level}</strong> in {f.place}
+                    {focus === f.id && <div className="muted small" style={{ marginTop: 4 }}>{f.why}</div>}
+                  </div>
+                ))}
+                {res.web_results.length > 0 && (
+                  <div style={{ borderTop: "1px solid var(--line)", padding: "10px 18px", background: focus === "Web" ? "var(--green-50)" : undefined }}>
+                    <span className="chip wait">web</span> <strong>Found on the web</strong>
+                    <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                      {res.web_results.map((w) => (
+                        <li key={w.url}><a href={w.url} target="_blank" rel="noreferrer">{w.title}</a>{w.snippet && <span className="muted small"> · “{w.snippet}”</span>}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </section>
-
-              {res.facts.length > 0 && (
-                <section className="card" style={{ padding: 0 }}>
-                  <h2 style={{ margin: 0, fontSize: 16, padding: "14px 16px 6px" }}>Our need levels</h2>
-                  {res.facts.map((f) => (
-                    <div key={f.id} style={{ borderTop: "1px solid var(--line)", padding: "8px 16px", background: focus === f.id ? "var(--green-50)" : undefined }}>
-                      <span className="chip wait">{f.id}</span> <strong style={{ fontSize: 13 }}>{f.place}</strong> · {f.category}: {f.level}
-                      {focus === f.id && <div className="muted small" style={{ marginTop: 4 }}>{f.why}</div>}
-                    </div>
-                  ))}
-                </section>
-              )}
-
-              {res.web_results.length > 0 && (
-                <section className="card" style={{ padding: 0 }}>
-                  <h2 style={{ margin: 0, fontSize: 16, padding: "14px 16px 6px" }}>From the web</h2>
-                  {res.web_results.map((w) => (
-                    <div key={w.url} style={{ borderTop: "1px solid var(--line)", padding: "8px 16px" }}>
-                      <a href={w.url} target="_blank" rel="noreferrer" style={{ fontWeight: 600, fontSize: 14 }}>{w.title}</a>
-                      {w.snippet && <div className="muted small">“{w.snippet}”</div>}
-                    </div>
-                  ))}
-                </section>
-              )}
-            </aside>
-          </div>
+            )}
+          </>
         )}
       </main>
     </>
