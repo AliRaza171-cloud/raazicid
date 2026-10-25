@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from app.services.rag.finder import _cited, build_prompt, tidy
+from app.services.rag.finder import _cited, build_prompt, tidy, use_web, web_list
 from app.services.rag.search import Hit, keywords, rrf
 from app.services.rag.text import chunk_pages, clean, html_text
 
@@ -57,9 +57,9 @@ def test_prompt_numbers_sources_and_facts():
     p = build_prompt("Where is food needed?", "Sindh", "Food", [hit], facts, web=True)
     assert "[S1] Sindh drought assessment (PDMA Sindh, 01 Sep 2026, page 4) · places: Tharparkar" in p
     assert "[D1] Sindh › Tharparkar: Food need is urgent (score 85)" in p
-    assert "search the web" in p and "```json" in p
+    assert "Search the web" in p and "```json" in p
     empty = build_prompt("Where?", None, None, [], [], web=False)
-    assert "(no matching passages in the library)" in empty and "search the web" not in empty
+    assert "(no matching passages in the library)" in empty and "Search the web" not in empty
 
 
 def test_citations_found():
@@ -72,3 +72,24 @@ def test_web_cite_tags_become_plain_markers():
     assert tidy("<cite index='8-1'>Free textbooks were late</cite>, so parents paid more.") == "Free textbooks were late, [Web] so parents paid more."
     assert tidy("Lyari needs blankets [S1]. <b>bold</b>  text") == "Lyari needs blankets [S1]. bold text"
     assert "<" not in tidy("<cite index='5-3'>Prices up to 300%</cite><cite index='5-4'> higher</cite> in Islamabad [S2].")
+
+
+def _hit(how, score=0.015):
+    return Hit(chunk_id=uuid.uuid4(), report_id=uuid.uuid4(), title="t", publisher=None, url=None, page=None, published_at=None,
+               source="s", text="x", score=score, how=how)
+
+
+def test_auto_web_search_when_library_is_thin():
+    strong = [_hit(["words"]) for _ in range(3)]
+    weak = [_hit(["meaning"]) for _ in range(8)]            # vector search always returns something, even if unrelated
+    assert use_web("auto", []) and use_web("auto", weak) and use_web("auto", strong[:2] + weak)
+    assert not use_web("auto", strong)
+    assert use_web("always", strong) and not use_web("off", [])
+
+
+def test_web_list_puts_quoted_pages_first():
+    cites = [{"url": "https://dawn.com/a", "title": "A", "cited_text": "40% shortage"}]
+    searched = [{"url": "https://geo.tv/b", "title": "B", "page_age": "2 days ago"}, {"url": "https://dawn.com/a", "title": "A"}]
+    out = web_list(cites, searched)
+    assert [(w["url"], w["cited"]) for w in out] == [("https://dawn.com/a", True), ("https://geo.tv/b", False)]
+    assert out[0]["snippet"] == "40% shortage" and out[1]["age"] == "2 days ago"

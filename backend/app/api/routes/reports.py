@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from pydantic import BaseModel, Field
@@ -77,7 +77,8 @@ class AskIn(BaseModel):
     question: str = Field(min_length=5, max_length=600)
     location_id: Optional[uuid.UUID] = None
     category_id: Optional[int] = None
-    web_search: bool = False
+    web: Literal["auto", "always", "off"] = "auto"   # auto = search the web when the library has little on this
+    web_search: Optional[bool] = None                # older clients: true = always, false = off
 
 
 # ---------- helpers ----------
@@ -293,4 +294,5 @@ def embed_missing(_: User = Depends(admin_only), db: Session = Depends(get_db)):
 def need_finder(body: AskIn, _: User = Depends(admin_only), db: Session = Depends(get_db)):
     if body.location_id and db.get(Location, body.location_id) is None:
         raise api_error(422, "bad_location", "Choose the place from the list")
-    return find_needs(db, " ".join(body.question.split()), body.location_id, body.category_id, body.web_search)
+    mode = body.web if body.web_search is None else ("always" if body.web_search else "off")
+    return find_needs(db, " ".join(body.question.split()), body.location_id, body.category_id, mode)

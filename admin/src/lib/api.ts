@@ -484,8 +484,9 @@ export interface FinderAnswer {
   confidence: "low" | "medium" | "high";
   sources: FinderSource[];
   facts: { id: string; location_id: string; place: string; category: string; level: string; score: number; why: string }[];
-  web_results: { url: string; title: string; snippet: string }[];
+  web_results: { url: string; title: string; snippet: string; cited: boolean; age?: string }[];
   used_web: boolean;
+  web_mode: "auto" | "always" | "off";
   ai: boolean;
   model: string;
 }

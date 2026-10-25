@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models import Category, Location, NeedLevel
-from app.services.claude import ClaudeError, ask_complete, extract_json, text_and_citations
+from app.services.claude import ClaudeError, ask_complete, extract_json, search_results, text_and_citations
 from app.services.gazetteer import find_places, load_places
 from app.services.locations import descendant_ids, location_path
 from app.services.needs import LEVEL_NAMES
@@ -25,6 +25,19 @@ from app.services.rag.search import Hit, query_vector, search
 
 WEB_DOMAINS = None   # None = any site; Claude is told to prefer official and humanitarian sources
 LEVEL_WORDS = {"urgent": 3, "high": 2, "some": 1}
+WEB_MODES = ("auto", "always", "off")
+AUTO_WEB_BELOW = 3   # "auto": search the web when the library has fewer good passages than this
+WEB_SEARCHES = 4     # web searches Claude may run per question (about 1 cent each)
+
+
+def use_web(mode: str, hits: list) -> bool:
+    """Should this question also search the web?"""
+    if mode == "always":
+        return True
+    if mode == "off":
+        return False
+    strong = [h for h in hits if "words" in h.how or h.score >= 0.02]   # found by the words, or ranked high by meaning
+    return len(strong) < AUTO_WEB_BELOW
 
 SYSTEM = """You are the need finder for RAAZICID, a donation charity in Pakistan that collects goods (food, rations,
 clothes, blankets, winter items, hygiene kits, baby items, household items, school supplies, books, mobility aids,
@@ -108,9 +121,25 @@ def build_prompt(question: str, place: Optional[str], category: Optional[str], h
     else:
         parts.append("(no need levels for this place yet)")
     if web:
-        parts.append("\nYou may search the web for recent information (NDMA, PDMA, PMD, ReliefWeb, UN agencies, major Pakistani news).")
+        parts.append("\nSearch the web for recent information about this question in Pakistan (last few months first). "
+                     "Prefer NDMA, PDMA, PMD, ReliefWeb, UN agencies (WFP, UNICEF, OCHA), NGOs and major Pakistani news "
+                     "(Dawn, Express Tribune, The News, Geo). Combine what you find with the library passages above.")
     parts.append("\n" + FORMAT)
     return "\n\n".join(parts)
+
+
+def web_list(cites: list[dict], searched: list[dict]) -> list[dict]:
+    """Pages Claude quoted first (with the quote), then other pages the search found."""
+    out, seen = [], set()
+    for c in cites:
+        if c["url"] not in seen:
+            seen.add(c["url"])
+            out.append({"url": c["url"], "title": c["title"], "snippet": c.get("cited_text", "")[:300], "cited": True})
+    for r in searched:
+        if r["url"] not in seen:
+            seen.add(r["url"])
+            out.append({"url": r["url"], "title": r["title"], "snippet": "", "cited": False, "age": r.get("page_age", "")})
+    return out[:12]
 
 
 def _cited(text: str) -> set[str]:
@@ -147,7 +176,9 @@ def match_areas(db: Session, areas: list[dict], category_id: Optional[int]) -> l
 
 
 def find_needs(db: Session, question: str, location_id: Optional[uuid.UUID] = None, category_id: Optional[int] = None,
-               web_search: bool = False) -> dict[str, Any]:
+               web: str = "auto") -> dict[str, Any]:
+    """web: "auto" (search the web when the library has little on this), "always" or "off"."""
+    web = web if web in WEB_MODES else "auto"
     db.commit()   # close the transaction left open by the login check: slow steps below must not hold one
     place = " › ".join(location_path(db, location_id)) if location_id else None
     cat = db.get(Category, category_id) if category_id else None
@@ -164,15 +195,17 @@ def find_needs(db: Session, question: str, location_id: Optional[uuid.UUID] = No
                 "date": h.published_at.isoformat() if h.published_at else None, "text": h.text, "places": h.places,
                 "found_by": h.how} for i, h in enumerate(hits, start=1)]
     base = {"question": question, "place": place, "category": cat_name, "sources": sources,
-            "facts": facts, "web_results": [], "used_web": False, "model": settings.CLAUDE_MODEL}
+            "facts": facts, "web_results": [], "used_web": False, "web_mode": web, "model": settings.CLAUDE_MODEL}
 
     if not settings.ANTHROPIC_API_KEY:
         msg = "Claude is not set up (add ANTHROPIC_API_KEY), so here are the most relevant passages and our need levels."
         return {**base, "answer": msg, "summary": msg, "points": [], "note": "", "areas": [], "confidence": "low", "ai": False}
 
+    web_search = use_web(web, hits)
+    base["web_mode"] = web
     tools = None
     if web_search:
-        tool: dict[str, Any] = {"type": "web_search_20250305", "name": "web_search", "max_uses": 3}
+        tool: dict[str, Any] = {"type": "web_search_20250305", "name": "web_search", "max_uses": WEB_SEARCHES}
         if WEB_DOMAINS:
             tool["allowed_domains"] = WEB_DOMAINS
         tools = [tool]
@@ -210,6 +243,6 @@ def find_needs(db: Session, question: str, location_id: Optional[uuid.UUID] = No
             "note": note,
             "areas": match_areas(db, areas, category_id),
             "confidence": data.get("confidence") if data.get("confidence") in ("low", "medium", "high") else "medium",
-            "web_results": [{"url": c["url"], "title": c["title"], "snippet": c.get("cited_text", "")[:300]} for c in cites],
+            "web_results": web_list(cites, search_results(res)),
             "used_web": bool(web_search),
             "ai": True}

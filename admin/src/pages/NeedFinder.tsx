@@ -32,7 +32,8 @@ export default function NeedFinder() {
   const [question, setQuestion] = useState("");
   const [locationId, setLocationId] = useState<string | null>(null);
   const [categoryId, setCategoryId] = useState<number | null>(null);
-  const [web, setWeb] = useState(false);
+  const [web, setWeb] = useState<"auto" | "always" | "off">("auto");
+  const [saved, setSaved] = useState<Record<string, string>>({});   // url -> "saving" | "saved" | error text
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [res, setRes] = useState<FinderAnswer | null>(null);
@@ -53,15 +54,27 @@ export default function NeedFinder() {
     setFocus(null);
     setShowSources(false);
     setAppealFor(null);
+    setSaved({});
     try {
       setRes(await api<FinderAnswer>("/admin/need-finder/ask", {
         method: "POST",
-        body: JSON.stringify({ question: question.trim(), location_id: locationId, category_id: categoryId, web_search: web }),
+        body: JSON.stringify({ question: question.trim(), location_id: locationId, category_id: categoryId, web }),
       }));
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const saveToLibrary = async (url: string, title: string) => {
+    setSaved((x) => ({ ...x, [url]: "saving" }));
+    try {
+      await api("/admin/reports/link", { method: "POST", body: JSON.stringify({ url, title }) });
+      setSaved((x) => ({ ...x, [url]: "saved" }));
+    } catch (e) {
+      const msg = (e as Error).message;
+      setSaved((x) => ({ ...x, [url]: msg.startsWith("Already in the library") ? "saved" : msg }));
     }
   };
 
@@ -105,10 +118,18 @@ export default function NeedFinder() {
               <option value="">Any category</option>
               {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-            <label style={{ display: "flex", gap: 6, alignItems: "center", margin: 0, fontWeight: 600 }} title="Claude also searches the web (about 1 cent per search)">
-              <input type="checkbox" checked={web} onChange={(e) => setWeb(e.target.checked)} /> Also search the web
+            <label style={{ display: "flex", gap: 6, alignItems: "center", margin: 0, fontWeight: 600 }}>
+              Web search
+              <select className="select" value={web} onChange={(e) => setWeb(e.target.value as "auto" | "always" | "off")}
+                title="Each web search costs about 1 cent and takes up to a minute">
+                <option value="auto">Auto (when our reports have little)</option>
+                <option value="always">Always</option>
+                <option value="off">Off (our reports only)</option>
+              </select>
             </label>
-            <button className="btn" type="submit" disabled={busy} style={{ marginLeft: "auto" }}>{busy ? (web ? "Searching the library and the web…" : "Searching the library…") : "Find needs"}</button>
+            <button className="btn" type="submit" disabled={busy} style={{ marginLeft: "auto" }}>
+              {busy ? (web === "off" ? "Searching our reports…" : "Searching our reports and the web…") : "Find needs"}
+            </button>
           </div>
         </form>
 
@@ -128,7 +149,8 @@ export default function NeedFinder() {
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", borderTop: "1px solid var(--line)", paddingTop: 10 }}>
                 <span className="muted small">
                   Based on {res.sources.length} report passage{res.sources.length === 1 ? "" : "s"}
-                  {res.facts.length ? ", our need data" : ""}{res.web_results.length ? ` and ${res.web_results.length} web page${res.web_results.length === 1 ? "" : "s"}` : ""}
+                  {res.facts.length ? ", our need data" : ""}
+                  {res.used_web ? ` and a web search (${res.web_results.length} page${res.web_results.length === 1 ? "" : "s"})` : res.web_mode === "auto" ? " (our reports covered it, no web search needed)" : ""}
                   {res.ai ? ` · how sure: ${res.confidence}` : ""}
                 </span>
                 <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={() => setShowSources(!showSources)}>
@@ -215,11 +237,27 @@ export default function NeedFinder() {
                 {res.web_results.length > 0 && (
                   <div style={{ borderTop: "1px solid var(--line)", padding: "10px 18px", background: focus === "Web" ? "var(--green-50)" : undefined }}>
                     <span className="chip wait">web</span> <strong>Found on the web</strong>
-                    <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
-                      {res.web_results.map((w) => (
-                        <li key={w.url}><a href={w.url} target="_blank" rel="noreferrer">{w.title}</a>{w.snippet && <span className="muted small"> · “{w.snippet}”</span>}</li>
-                      ))}
-                    </ul>
+                    <span className="muted small"> · Save a good page to the library so future answers can use it without searching.</span>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+                      {res.web_results.map((w) => {
+                        const st = saved[w.url];
+                        return (
+                          <div key={w.url} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <a href={w.url} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>{w.title}</a>
+                              <div className="muted small">
+                                {new URL(w.url).hostname.replace("www.", "")}{w.age ? ` · ${w.age}` : ""}{w.cited ? " · used in the answer" : ""}
+                              </div>
+                              {w.snippet && <div className="small" style={{ marginTop: 2 }}>“{w.snippet}”</div>}
+                              {st && st !== "saving" && st !== "saved" && <div className="small" style={{ color: "var(--urgent)" }}>{st}</div>}
+                            </div>
+                            <button className="btn ghost small" disabled={st === "saving" || st === "saved"} onClick={() => saveToLibrary(w.url, w.title)}>
+                              {st === "saving" ? "Saving…" : st === "saved" ? "Saved ✓" : "Save to library"}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
               </section>

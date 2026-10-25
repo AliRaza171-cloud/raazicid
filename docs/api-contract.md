@@ -321,8 +321,8 @@ Both create *unconfirmed* alerts with their source links; donors see an alert on
    full-text search finds the same words, and reciprocal rank fusion merges the two lists. A place filter keeps
    passages about that place, places inside it, or the province / city around it.
 3. *Augment:* the top 8 passages ([S1]…) and our computed need levels for the place ([D1]…) go into the prompt.
-4. *Generate:* Claude answers only from those sources (plus web search if switched on), cites every claim and
-   names areas. Areas are matched to our places so the admin can open them or send an appeal.
+4. *Generate:* Claude answers only from those sources, plus web search (automatic when the library has little
+   on the question, or always / off), cites every claim and names areas. Useful web pages can be saved into the library. Areas are matched to our places so the admin can open them or send an appeal.
 
 Without embeddings installed, search is keyword only; without a Claude key, the need finder returns the passages
 and need levels without a written answer.
@@ -330,7 +330,7 @@ and need levels without a written answer.
 ```json
 // POST /admin/need-finder/ask
 { "question": "Where in Karachi are blankets needed most this winter?", "location_id": "<karachi>", "category_id": 4,
-  "web_search": false }
+  "web": "auto" }   // auto = also search the web when fewer than 3 library passages match the words; "always" | "off"
 // 200
 { "summary": "Lyari needs blankets most: families sleep without them as nights get colder [S1].",
   "points": ["About half the families visited had no blanket [S1]", "Our data shows high need for winter items [D1]"],

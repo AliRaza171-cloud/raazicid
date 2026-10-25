@@ -73,3 +73,17 @@ def ask_complete(messages: list[dict[str, Any]], **kw) -> dict[str, Any]:
         res = ask(messages + [{"role": "assistant", "content": content}], **kw)
         content += res.get("content", [])
     return {**res, "content": content}
+
+
+def search_results(response: dict[str, Any]) -> list[dict[str, str]]:
+    """Every page the web search tool returned (url, title, age), without duplicates."""
+    out, seen = [], set()
+    for block in response.get("content", []):
+        if block.get("type") != "web_search_tool_result" or not isinstance(block.get("content"), list):
+            continue
+        for r in block["content"]:
+            url = r.get("url") if isinstance(r, dict) else None
+            if url and url not in seen:
+                seen.add(url)
+                out.append({"url": url, "title": r.get("title") or url, "page_age": r.get("page_age") or ""})
+    return out
