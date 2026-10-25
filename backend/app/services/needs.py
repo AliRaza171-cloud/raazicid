@@ -8,6 +8,11 @@ strong signal). Signals:
   Poverty headcount (province)             >=40% 40 · >=25% 25   (grocery, food, clothes, school, hygiene)
   Disaster alert in the area (30 days)     severe 90 · moderate 65 · watch 40; unconfirmed x0.7
   Open requests at a distribution point    40, or 60 if 50+ items asked for
+  People in need (OCHA, by sector)         share >=40% 85 · >=25% 65 · >=10% 45; or 500k+ 75 · 100k+ 60 · 20k+ 40
+  Rainfall vs long-term average (3 months) +100% 50 · +60% 40 (flood risk) · -60% 50 · -40% 35 (drought risk)
+
+3W (who works where, OCHA) does not change the level: it marks a place "neglected" for a category when the need
+is high or urgent and no organisation works on it there.
 """
 
 import uuid
@@ -21,6 +26,7 @@ from sqlalchemy.orm import Session
 from app.models import AlertNeed, Category, DisasterAlert, DistributionPoint, Location, NeedIndicator, NeedLevel, PointRequest
 from app.models.enums import AlertSeverity, AlertStatus, AlertType, RequestStatus
 from app.services.locations import descendant_ids
+from app.services.sources.hapi_un import category_sectors, sector_categories
 
 LEVEL_NAMES = ["none", "some", "high", "urgent"]
 
@@ -69,6 +75,28 @@ def score_alert(severity: AlertSeverity, confirmed: bool) -> int:
 
 def score_requests(quantity: int) -> int:
     return 60 if quantity >= 50 else 40
+
+
+def score_pin(people: float, share: Optional[float]) -> int:
+    if share is not None:
+        return 85 if share >= 0.40 else 65 if share >= 0.25 else 45 if share >= 0.10 else 0
+    return 75 if people >= 500_000 else 60 if people >= 100_000 else 40 if people >= 20_000 else 0
+
+
+RAIN_CATEGORIES = {"wet": ["emergency_relief", "hygiene", "household", "blankets"], "dry": ["food", "grocery_ration", "hygiene"]}
+
+
+def score_rain(anomaly_pct: float) -> tuple[int, Optional[str]]:
+    """(points, "wet" | "dry") from rainfall compared with the long-term average, in percent."""
+    if anomaly_pct >= 100:
+        return 50, "wet"
+    if anomaly_pct >= 60:
+        return 40, "wet"
+    if anomaly_pct <= -60:
+        return 50, "dry"
+    if anomaly_pct <= -40:
+        return 35, "dry"
+    return 0, None
 
 
 def level_of(score: float) -> int:
@@ -140,6 +168,23 @@ def recompute(db: Session) -> int:
                  "source": "WFP food prices via HDX", "date": when}
             add(ind.location_id, "grocery_ration", score_price(ind.value), r)
             add(ind.location_id, "food", score_price(ind.value), r, adjust=-10)
+        elif ind.indicator == "people_in_need":
+            meta = ind.meta or {}
+            share = meta.get("share")
+            pts = score_pin(ind.value, share)
+            sector = meta.get("sector") or "all sectors"
+            people = f"{int(ind.value):,} people" + (f" ({share:.0%})" if share else "")
+            r = {"why": f"{people} in need of {sector} help", "source": "OCHA people in need via HDX", "date": when}
+            for slug in sector_categories(sector):
+                add(ind.location_id, slug, pts, r)
+        elif ind.indicator == "rainfall_anomaly_pct":
+            pts, kind = score_rain(ind.value)
+            if kind:
+                word = "more" if kind == "wet" else "less"
+                r = {"why": f"Rain {abs(ind.value):.0f}% {word} than normal over 3 months ({'flood' if kind == 'wet' else 'drought'} risk)",
+                     "source": "WFP rainfall via HDX", "date": when}
+                for slug in RAIN_CATEGORIES[kind]:
+                    add(ind.location_id, slug, pts, r)
         elif ind.indicator == "poverty_headcount":
             r = {"why": f"{ind.value:.0%} of people multidimensionally poor", "source": "Poverty rate via HDX", "date": when}
             for slug in ("grocery_ration", "food", "clothes", "school_supplies", "hygiene"):
@@ -197,15 +242,29 @@ def area_needs(db: Session, parent_id: Optional[uuid.UUID]) -> dict[str, Any]:
                  "score": round(nl.score), "reasons": nl.reasons} for cid, nl in best.items()]
         return sorted(rows, key=lambda r: (-r["score"], r["category_id"]))
 
+    slugs = {c.id: c.slug for c in db.scalars(select(Category))}
+    has_3w = db.scalar(select(NeedIndicator.id).where(NeedIndicator.indicator == "orgs_present").limit(1)) is not None
+
+    def who_works(loc_ids: list[uuid.UUID]) -> dict[str, list[str]]:
+        sectors: dict[str, set] = defaultdict(set)
+        for ind in db.scalars(select(NeedIndicator).where(NeedIndicator.indicator == "orgs_present", NeedIndicator.location_id.in_(loc_ids))):
+            for sector, orgs in ((ind.meta or {}).get("sectors") or {}).items():
+                sectors[sector] |= set(orgs)
+        return {k: sorted(v) for k, v in sorted(sectors.items())}
+
     children = db.scalars(select(Location).where(Location.parent_id == parent_id if parent_id else Location.parent_id.is_(None))
                           .order_by(Location.name)).all()
     out_children = []
     for c in children:
         sub = descendant_ids(db, c.id)
         needs = summary(sub)
+        works = who_works(sub) if has_3w else {}
+        neglected = [n["name"] for n in needs if has_3w and n["level"] >= 2
+                     and not category_sectors(slugs.get(n["category_id"], ""), list(works))]
         out_children.append({"id": str(c.id), "name": c.name, "level": c.level.value, "lat": c.lat, "lng": c.lng,
                              "has_children": len(sub) > 1, "max_level": max((n["level"] for n in needs), default=0),
-                             "needs": needs})
+                             "needs": needs, "orgs": len(set().union(*map(set, works.values()))) if works else 0,
+                             "who_works": works, "neglected": neglected})
     out_children.sort(key=lambda r: (-r["max_level"], -sum(n["score"] for n in r["needs"][:3]), r["name"]))
     parent = db.get(Location, parent_id) if parent_id else None
     computed = db.scalar(select(NeedLevel.computed_at).limit(1))
@@ -214,4 +273,5 @@ def area_needs(db: Session, parent_id: Optional[uuid.UUID]) -> dict[str, Any]:
         "summary": summary(descendant_ids(db, parent_id)) if parent_id else None,
         "children": out_children,
         "computed_at": computed,
+        "has_3w": has_3w,
     }

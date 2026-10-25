@@ -141,8 +141,12 @@ pip install sentence-transformers        # optional: vector search (needs torch;
 ```
 Without `sentence-transformers` the need finder uses keyword search; everything else works. If you install it
 after adding reports, press **Add vectors to … passages** on the Report library page.
-Once ReliefWeb approves your appname, add `RELIEFWEB_APPNAME=...` to `backend/.env`: its Pakistan reports then
-arrive every 6 hours.
+Once ReliefWeb approves your appname, add `RELIEFWEB_APPNAME=...` to `backend/.env`: Pakistan reports from UN
+agencies (UNICEF, WFP, WHO, UNHCR, OCHA…) then arrive every 6 hours, and the need finder looks up ReliefWeb live.
+
+UN data from HDX HAPI (no extra setup, it comes with the daily HDX fetch): OCHA 3W (who works where), people in
+need by sector, rainfall anomalies and UNHCR refugee totals. Needs by area then shows "Who works here" and
+**Neglected places** (high need, nobody working on it).
 
 ---
 

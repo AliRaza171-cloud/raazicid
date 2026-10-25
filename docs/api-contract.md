@@ -267,6 +267,14 @@ of 25+. 80+ urgent (3), 55+ high (2), 30+ some (1).
 | Poverty headcount (ration, food, clothes, school, hygiene) | HDX HAPI `poverty-rate` | ≥40% 40 · ≥25% 25 |
 | Disaster alert, last 30 days (categories by type) | GDACS, Claude web scan, admin | severe 90 · moderate 65 · watch 40; unconfirmed ×0.7 |
 | Open requests at a distribution point | our points | 40, or 60 if 50+ items |
+| People in need, by sector (education → school supplies and books, health / WASH → hygiene, shelter → blankets, household and winter items, food → food and rations…) | OCHA via HDX HAPI `affected-people/humanitarian-needs` | share ≥40% 85 · ≥25% 65 · ≥10% 45; or 500k+ 75 · 100k+ 60 · 20k+ 40 |
+| Rainfall over 3 months vs the long-term average | WFP / CHIRPS via HDX HAPI `climate/rainfall` | +100% 50 · +60% 40 (flood risk: relief, hygiene, household, blankets) · −60% 50 · −40% 35 (drought risk: food, rations, hygiene) |
+
+**Who works where (OCHA 3W, HDX HAPI `coordination-context/operational-presence`).** Each place in `/needs` also
+has `orgs`, `who_works` (sector → organisations) and `neglected`: the categories in high or urgent need there with
+no organisation working on a matching sector. UNHCR refugee totals (`affected-people/refugees-persons-of-concern`)
+exist for Pakistan as a whole only, so they are saved as a short report in the library for the need finder.
+HAPI does not publish every subject for every country; the HDX source status names what was missing.
 
 A place shows the highest level found anywhere inside it.
 
@@ -320,7 +328,9 @@ Both create *unconfirmed* alerts with their source links; donors see an alert on
 2. *Retrieve:* hybrid search. Vector search (cosine distance) finds passages with the same meaning, Postgres
    full-text search finds the same words, and reciprocal rank fusion merges the two lists. A place filter keeps
    passages about that place, places inside it, or the province / city around it.
-3. *Augment:* the top 8 passages ([S1]…) and our computed need levels for the place ([D1]…) go into the prompt.
+3. *Augment:* the top 8 passages ([S1]…), our computed need levels for the place and OCHA 3W "who works here"
+   facts ([D1]…) go into the prompt. With a ReliefWeb appname, the most relevant recent ReliefWeb reports for the
+   question are fetched live and added to the library first (UN agency reports are also fetched every 6 hours).
 4. *Generate:* Claude answers only from those sources, plus web search (automatic when the library has little
    on the question, or always / off), cites every claim and names areas. Useful web pages can be saved into the library. Areas are matched to our places so the admin can open them or send an appeal.
 

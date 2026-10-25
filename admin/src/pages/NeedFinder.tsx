@@ -149,7 +149,9 @@ export default function NeedFinder() {
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", borderTop: "1px solid var(--line)", paddingTop: 10 }}>
                 <span className="muted small">
                   Based on {res.sources.length} report passage{res.sources.length === 1 ? "" : "s"}
-                  {res.facts.length ? ", our need data" : ""}
+                  {res.facts.some((f) => f.kind !== "3w") ? ", our need data" : ""}
+                  {res.facts.some((f) => f.kind === "3w") ? ", UN data on who works where" : ""}
+                  {res.reliefweb_found ? `, ${res.reliefweb_found} ReliefWeb reports checked` : ""}
                   {res.used_web ? ` and a web search (${res.web_results.length} page${res.web_results.length === 1 ? "" : "s"})` : res.web_mode === "auto" ? " (our reports covered it, no web search needed)" : ""}
                   {res.ai ? ` · how sure: ${res.confidence}` : ""}
                 </span>
@@ -230,7 +232,10 @@ export default function NeedFinder() {
                 ))}
                 {res.facts.map((f) => (
                   <div key={f.id} style={{ borderTop: "1px solid var(--line)", padding: "10px 18px", background: focus === f.id ? "var(--green-50)" : undefined }}>
-                    <span className="chip wait">{f.id}</span> <strong>Our data:</strong> {f.category} need is <strong>{f.level}</strong> in {f.place}
+                    <span className="chip wait">{f.id}</span>{" "}
+                    {f.kind === "3w"
+                      ? <><strong>Who works in {f.place.split(" › ").slice(-1)[0]}:</strong> {f.text}</>
+                      : <><strong>Our data:</strong> {f.category} need is <strong>{f.level}</strong> in {f.place}</>}
                     {focus === f.id && <div className="muted small" style={{ marginTop: 4 }}>{f.why}</div>}
                   </div>
                 ))}

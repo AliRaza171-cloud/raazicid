@@ -141,7 +141,7 @@ export default function NeedsMap() {
         return {
           id: r.id, lat: r.lat as number, lng: r.lng as number, kind: "point" as const, color: DOT[lv], size: 14 + lv * 5,
           ring: gapIds.has(r.id) ? GAP_RING : undefined, selected: focusRow === r.id,
-          label: `${r.name}: ${LEVELS[lv].label}${categoryId === null && top.length ? ` (${top.slice(0, 3).join(", ")})` : ""}${gapIds.has(r.id) ? " · no point nearby" : ""}`,
+          label: `${r.name}: ${LEVELS[lv].label}${categoryId === null && top.length ? ` (${top.slice(0, 3).join(", ")})` : ""}${gapIds.has(r.id) ? " · no point nearby" : ""}${r.neglected.length ? " · neglected" : ""}`,
           onClick: () => { setFocusPoint(null); setPicked(null); setFocusRow(r.id); },
         };
       }),
@@ -228,6 +228,7 @@ export default function NeedsMap() {
                           )}
                           <div className="muted small" style={{ textTransform: "capitalize" }}>
                             {r.level}{gapIds.has(r.id) && <span style={{ color: "var(--urgent)", fontWeight: 700, textTransform: "none" }}> · no point nearby</span>}
+                            {r.neglected.length > 0 && <span style={{ color: "#7c3aed", fontWeight: 700, textTransform: "none" }} title="High need, but no UN agency or NGO works on it here (OCHA 3W)"> · neglected</span>}
                           </div>
                         </td>
                         {cats.map((c) => {
@@ -266,6 +267,37 @@ export default function NeedsMap() {
             )}
           </aside>
         </div>
+
+        {data?.has_3w && (
+          <section className="card" style={{ padding: 0 }}>
+            <div style={{ padding: "16px 18px 0" }}>
+              <h2 style={{ margin: 0, fontSize: 16 }}>Neglected places in {here.name}</h2>
+              <p className="muted small" style={{ margin: "2px 0 0" }}>
+                High or urgent need, but no UN agency or NGO reports working on it there (OCHA 3W: who does what where).
+              </p>
+            </div>
+            {data.children.filter((r) => r.neglected.length > 0).length === 0 ? (
+              <p className="muted" style={{ padding: "10px 18px 16px", margin: 0 }}>None: every high need here has an organisation working on it.</p>
+            ) : (
+              <table className="table">
+                <thead><tr><th>Place</th><th>Nobody working on</th><th>Organisations there</th><th /></tr></thead>
+                <tbody>
+                  {data.children.filter((r) => r.neglected.length > 0).map((r) => (
+                    <tr key={r.id}>
+                      <td><strong>{r.name}</strong><div className="muted small" style={{ textTransform: "capitalize" }}>{r.level}</div></td>
+                      <td>{r.neglected.join(", ")}</td>
+                      <td className="small">{r.orgs ? `${r.orgs} (${Object.keys(r.who_works).slice(0, 3).join(", ")})` : "None reported"}</td>
+                      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                        <button className="btn ghost small" onClick={() => { setPicked(null); setFocusPoint(null); setFocusRow(r.id); }}>Details</button>{" "}
+                        {r.has_children && <button className="btn ghost small" onClick={() => open(r)}>Look inside</button>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+        )}
 
         <section className="card" style={{ padding: 0 }}>
           <div style={{ padding: "16px 18px 0" }}>
@@ -369,6 +401,22 @@ function PlacePanel({ row, categoryId, levelOf, nearest, gap, onReason, onOpen }
       <div className="muted small">
         {nearest ? <>Nearest open point: <strong style={{ color: "var(--ink)" }}>{nearest.point.name}</strong>, {Math.round(nearest.km)} km</> : "No open distribution point takes this yet."}
       </div>
+      {row.neglected.length > 0 && (
+        <div className="flash" style={{ background: "#f1ebfe", color: "#5b21b6", fontWeight: 600 }}>
+          Neglected: high need for {row.neglected.join(", ").toLowerCase()}, but no UN agency or NGO works on it here.
+          <div style={{ fontWeight: 500, marginTop: 4 }}>A good place for RAAZICID to help: few others are.</div>
+        </div>
+      )}
+      {Object.keys(row.who_works).length > 0 && (
+        <div>
+          <div className="kpi-label">Who works here ({row.orgs} organisations, OCHA 3W)</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 4 }}>
+            {Object.entries(row.who_works).map(([sector, orgs]) => (
+              <div key={sector} className="small"><strong>{sector}:</strong> {orgs.slice(0, 6).join(", ")}{orgs.length > 6 ? ` +${orgs.length - 6}` : ""}</div>
+            ))}
+          </div>
+        </div>
+      )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {row.has_children && <button className="btn small" onClick={onOpen}>Look inside {row.name}</button>}
         <Link className="btn ghost small" to="/points">Distribution points</Link>

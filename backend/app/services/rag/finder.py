@@ -16,12 +16,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models import Category, Location, NeedLevel
+from app.models import Category, Location, NeedIndicator, NeedLevel
 from app.services.claude import ClaudeError, ask_complete, extract_json, search_results, text_and_citations
 from app.services.gazetteer import find_places, load_places
 from app.services.locations import descendant_ids, location_path
 from app.services.needs import LEVEL_NAMES
-from app.services.rag.search import Hit, query_vector, search
+from app.services.rag.search import Hit, keywords, query_vector, search
+from app.services.sources import reliefweb
+from app.services.sources.hapi_un import category_sectors
 
 WEB_DOMAINS = None   # None = any site; Claude is told to prefer official and humanitarian sources
 LEVEL_WORDS = {"urgent": 3, "high": 2, "some": 1}
@@ -100,6 +102,53 @@ def need_facts(db: Session, location_id: Optional[uuid.UUID], category_id: Optio
     return out
 
 
+def un_facts(db: Session, location_id: Optional[uuid.UUID], category_id: Optional[int], start: int, limit: int = 6) -> list[dict]:
+    """Who works where (OCHA 3W) for the places with the highest need, as facts [Dn]. Empty without 3W data."""
+    stmt = select(NeedIndicator, Location).join(Location, Location.id == NeedIndicator.location_id).where(NeedIndicator.indicator == "orgs_present")
+    if location_id:
+        stmt = stmt.where(NeedIndicator.location_id.in_(descendant_ids(db, location_id)))
+    rows = db.execute(stmt).all()
+    if not rows:
+        return []
+    cat = db.get(Category, category_id) if category_id else None
+    need_stmt = select(NeedLevel.location_id, NeedLevel.score).where(NeedLevel.location_id.in_([loc.id for _, loc in rows]))
+    if category_id:
+        need_stmt = need_stmt.where(NeedLevel.category_id == category_id)
+    score: dict[uuid.UUID, float] = {}
+    for lid, sc in db.execute(need_stmt).all():
+        score[lid] = max(sc, score.get(lid, 0))
+    rows.sort(key=lambda r: -score.get(r[1].id, 0))
+    out = []
+    for i, (ind, loc) in enumerate(rows[:limit]):
+        sectors: dict[str, list[str]] = (ind.meta or {}).get("sectors") or {}
+        if cat:
+            relevant = category_sectors(cat.slug, list(sectors))
+            text = (f"organisations working on {cat.name.lower()}: " + "; ".join(f"{s} ({', '.join(sectors[s][:5])})" for s in relevant)
+                    if relevant else f"no organisation reported working on {cat.name.lower()} here")
+        else:
+            top = sorted(sectors.items(), key=lambda kv: -len(kv[1]))[:4]
+            text = f"{int(ind.value)} organisations work here, e.g. " + "; ".join(f"{s}: {', '.join(o[:4])}" for s, o in top)
+        out.append({"id": f"D{start + i}", "location_id": str(loc.id), "place": " › ".join(location_path(db, loc.id)),
+                    "category": "Who works here", "level": "", "score": 0, "kind": "3w",
+                    "text": f"{text} (OCHA 3W via HDX{', ' + ind.period_end.strftime('%b %Y') if ind.period_end else ''})", "why": ""})
+    return out
+
+
+def reliefweb_lookup(db: Session, query: str) -> int:
+    """Add the most relevant recent ReliefWeb reports for this question to the library (when the appname is set).
+    Returns how many were new. Never fails the question."""
+    if not reliefweb.enabled():
+        return 0
+    try:
+        items = reliefweb.search(" ".join(keywords(query)) or query, limit=5)
+        before = len(items)
+        reliefweb.sync(db, items)
+        return before
+    except Exception:
+        db.rollback()
+        return 0
+
+
 def build_prompt(question: str, place: Optional[str], category: Optional[str], hits: list[Hit], facts: list[dict], web: bool) -> str:
     parts = [f"Today is {datetime.now(timezone.utc).strftime('%d %B %Y')}.", f"Question: {question}"]
     if place:
@@ -114,15 +163,22 @@ def build_prompt(question: str, place: Optional[str], category: Optional[str], h
             parts.append(f"[S{i}] {h.title} ({h.publisher or h.source}, {_fmt_date(h.published_at)}{where}){tags}\n{h.text}")
     else:
         parts.append("(no matching passages in the library)")
-    parts.append("\n## RAAZICID need levels (computed from IPC, food prices, poverty, disaster alerts and point requests)")
+    parts.append("\n## RAAZICID need levels (from IPC, food prices, poverty, OCHA people in need, rainfall, disaster alerts and "
+                 "point requests) and who already works where (OCHA 3W). A place with high need and no organisation working "
+                 "on it is a gap RAAZICID could fill: say so when it applies.")
     if facts:
         for f in facts:
-            parts.append(f"[{f['id']}] {f['place']}: {f['category']} need is {f['level']} (score {f['score']}). {f['why']}")
+            if f.get("kind") == "3w":
+                parts.append(f"[{f['id']}] {f['place']}: {f['text']}")
+            else:
+                parts.append(f"[{f['id']}] {f['place']}: {f['category']} need is {f['level']} (score {f['score']}). {f['why']}")
     else:
         parts.append("(no need levels for this place yet)")
     if web:
         parts.append("\nSearch the web for recent information about this question in Pakistan (last few months first). "
-                     "Prefer NDMA, PDMA, PMD, ReliefWeb, UN agencies (WFP, UNICEF, OCHA), NGOs and major Pakistani news "
+                     "Prefer UN agencies working in Pakistan (UNICEF for education and children, WHO for health, WFP for "
+                     "food, UNHCR for refugees, OCHA and NDMA / PDMA for disasters, UNDP, UNFPA, IOM, FAO), ReliefWeb, NGOs "
+                     "and major Pakistani news "
                      "(Dawn, Express Tribune, The News, Geo). Combine what you find with the library passages above.")
     parts.append("\n" + FORMAT)
     return "\n\n".join(parts)
@@ -185,9 +241,11 @@ def find_needs(db: Session, question: str, location_id: Optional[uuid.UUID] = No
     cat_name = cat.name if cat else None   # plain values: reading ORM objects after a commit would reopen a transaction
     query = " ".join(x for x in [question, cat_name or "", place.split(" › ")[-1] if place else ""] if x)
     db.commit()
+    from_reliefweb = reliefweb_lookup(db, query)   # live UN / NGO reports into the library first (needs the appname)
     qvec = query_vector(query)
     hits = search(db, query, location_id, k=8, qvec=qvec)
     facts = need_facts(db, location_id, category_id)
+    facts += un_facts(db, location_id, category_id, start=len(facts) + 1)
     db.commit()   # Neon closes connections idle inside a transaction; Claude (with web search) can take minutes
 
     sources = [{"id": f"S{i}", "report_id": str(h.report_id), "chunk_id": str(h.chunk_id), "title": h.title,
@@ -195,7 +253,8 @@ def find_needs(db: Session, question: str, location_id: Optional[uuid.UUID] = No
                 "date": h.published_at.isoformat() if h.published_at else None, "text": h.text, "places": h.places,
                 "found_by": h.how} for i, h in enumerate(hits, start=1)]
     base = {"question": question, "place": place, "category": cat_name, "sources": sources,
-            "facts": facts, "web_results": [], "used_web": False, "web_mode": web, "model": settings.CLAUDE_MODEL}
+            "facts": facts, "web_results": [], "used_web": False, "web_mode": web, "model": settings.CLAUDE_MODEL,
+            "reliefweb_checked": reliefweb.enabled(), "reliefweb_found": from_reliefweb}
 
     if not settings.ANTHROPIC_API_KEY:
         msg = "Claude is not set up (add ANTHROPIC_API_KEY), so here are the most relevant passages and our need levels."

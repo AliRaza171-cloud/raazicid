@@ -362,6 +362,9 @@ export interface AreaRow {
   has_children: boolean;
   max_level: number;
   needs: AreaNeed[];
+  orgs: number;                          // organisations working here (OCHA 3W)
+  who_works: Record<string, string[]>;   // sector -> organisations
+  neglected: string[];                   // categories in high need with nobody working on them
 }
 
 export interface AreaNeeds {
@@ -369,6 +372,7 @@ export interface AreaNeeds {
   summary: AreaNeed[] | null;
   children: AreaRow[];
   computed_at: string | null;
+  has_3w: boolean;
 }
 
 export type AlertType = "flood" | "earthquake" | "cyclone" | "drought" | "heatwave" | "cold_wave" | "heavy_rain" | "other";
@@ -483,7 +487,9 @@ export interface FinderAnswer {
   areas: FinderArea[];
   confidence: "low" | "medium" | "high";
   sources: FinderSource[];
-  facts: { id: string; location_id: string; place: string; category: string; level: string; score: number; why: string }[];
+  facts: { id: string; location_id: string; place: string; category: string; level: string; score: number; why: string; kind?: "3w"; text?: string }[];
+  reliefweb_checked?: boolean;
+  reliefweb_found?: number;
   web_results: { url: string; title: string; snippet: string; cited: boolean; age?: string }[];
   used_web: boolean;
   web_mode: "auto" | "always" | "off";

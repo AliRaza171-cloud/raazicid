@@ -18,7 +18,8 @@ from app.models import Location, NeedIndicator
 from app.models.enums import LocationLevel, SourceKind
 from app.services.gazetteer import Place, find_places, load_places
 
-BASE = "https://hapi.humdata.org/api/v2/food-security-nutrition-poverty/"
+ROOT = "https://hapi.humdata.org/api/v2/"
+BASE = ROOT + "food-security-nutrition-poverty/"
 STAPLES = {"cereals and tubers", "pulses and nuts", "oil and fats"}
 TYPE_ORDER = {"current": 0, "first projection": 1, "second projection": 2}
 GROCERY_ID = 2
@@ -32,11 +33,13 @@ def app_identifier() -> Optional[str]:
     return None
 
 
-def get_all(path: str, app_id: str, **params) -> list[dict[str, Any]]:
+def get_all(path: str, app_id: str, root: str = BASE, pakistan: bool = True, **params) -> list[dict[str, Any]]:
+    """Every row of a HAPI endpoint, 1,000 at a time. pakistan=False for endpoints without location_code (refugees)."""
     rows, offset = [], 0
+    where = {"location_code": "PAK"} if pakistan else {}
     while offset <= 50000:
-        res = httpx.get(BASE + path, timeout=60, params={
-            "app_identifier": app_id, "location_code": "PAK", "output_format": "json", "limit": 1000, "offset": offset, **params})
+        res = httpx.get(root + path, timeout=60, params={
+            "app_identifier": app_id, **where, "output_format": "json", "limit": 1000, "offset": offset, **params})
         res.raise_for_status()
         page = res.json().get("data", [])
         rows += page
@@ -136,7 +139,52 @@ def _district(db: Session, province: Place, name: str, code: Optional[str], plac
     return loc
 
 
-def sync(db: Session, ipc: list[dict], prices: list[dict], poverty: list[dict], source_id: int) -> str:
+def _where(db: Session, r: dict, places: list[Place]) -> Optional[Location]:
+    """Our place for a HAPI row: the district (added under its province if new), or the province."""
+    prov = _province(r.get("admin1_name"), places)
+    if prov is None:
+        return None
+    if r.get("admin2_name"):
+        return _district(db, prov, r["admin2_name"], r.get("admin2_code"), places)
+    return db.get(Location, prov.id)
+
+
+def sync_un(db: Session, un: dict, source_id: int, places: list[Place]) -> list[str]:
+    """3W, people in need and rainfall as indicators; refugee totals as a library report. Returns status parts."""
+    parts = []
+    n = 0
+    for r in un.get("presence") or []:
+        loc = _where(db, r, places)
+        if loc is None:
+            continue
+        db.add(NeedIndicator(location_id=loc.id, indicator="orgs_present", value=r["orgs"], source_id=source_id,
+                             period_end=r["period_end"], meta={"sectors": r["sectors"]}))
+        n += 1
+    parts.append(f"3W {n} places" if n else "3W: none for Pakistan")
+    n = 0
+    for r in un.get("pin") or []:
+        loc = _where(db, r, places)
+        if loc is None:
+            continue
+        db.add(NeedIndicator(location_id=loc.id, indicator="people_in_need", value=r["people"], source_id=source_id,
+                             period_start=r["period_start"], period_end=r["period_end"],
+                             meta={"sector": r["sector"], "share": r["share"]}))
+        n += 1
+    parts.append(f"people in need {n}" if n else "people in need: none published for Pakistan")
+    n = 0
+    for r in un.get("rain") or []:
+        loc = _where(db, r, places)
+        if loc is None:
+            continue
+        db.add(NeedIndicator(location_id=loc.id, indicator="rainfall_anomaly_pct", value=r["anomaly_pct"], source_id=source_id,
+                             period_start=r["period_start"], period_end=r["period_end"],
+                             meta={"rainfall": r["rainfall"], "average": r["average"], "period": r["period"]}))
+        n += 1
+    parts.append(f"rainfall {n} districts" if n else "rainfall: none")
+    return parts
+
+
+def sync(db: Session, ipc: list[dict], prices: list[dict], poverty: list[dict], source_id: int, un: Optional[dict] = None) -> str:
     places = load_places(db)
     db.execute(delete(NeedIndicator).where(NeedIndicator.source_id == source_id))
     n_ipc = n_price = n_pov = 0
@@ -165,8 +213,25 @@ def sync(db: Session, ipc: list[dict], prices: list[dict], poverty: list[dict], 
         db.add(NeedIndicator(location_id=prov.id, indicator="poverty_headcount", value=r["share"], source_id=source_id,
                              period_start=r["period_start"], period_end=r["period_end"]))
         n_pov += 1
+    un_parts = sync_un(db, un, source_id, places) if un is not None else []
     db.commit()
-    return f"IPC {n_ipc} districts, prices {n_price} markets, poverty {n_pov} provinces"
+    if un and un.get("refugees"):
+        un_parts.append(save_refugees(db, un["refugees"]))
+    return "; ".join([f"IPC {n_ipc} districts, prices {n_price} markets, poverty {n_pov} provinces", *un_parts])
+
+
+def save_refugees(db: Session, r: dict) -> str:
+    """UNHCR totals become a short report in the library, so the need finder can quote them."""
+    from app.services.rag.ingest import IngestError, add_report
+    from app.services.sources.hapi_un import refugee_text
+    try:
+        _, created = add_report(db, kind=SourceKind.hdx_hapi, title=f"UNHCR: refugees and asylum-seekers in Pakistan ({r['period_end']:%Y})",
+                                pages=[(None, refugee_text(r))], publisher="UNHCR via HDX", external_id=f"unhcr-pak-{r['period_end']}",
+                                url="https://data.humdata.org/organization/unhcr")
+    except IngestError as e:
+        db.rollback()
+        return f"refugees: {e}"
+    return f"refugees {sum(r['groups'].values()):,} (UNHCR)" + ("" if created else ", already in library")
 
 
 def fetch_and_sync(db: Session, source_id: int) -> str:
@@ -178,7 +243,11 @@ def fetch_and_sync(db: Session, source_id: int) -> str:
     since = (date.today() - timedelta(days=270)).isoformat()
     prices = price_changes(get_all("food-prices-market-monitor", app_id, start_date=since, reference_period_start_min=since))
     poverty = poverty_latest(get_all("poverty-rate", app_id))
-    return sync(db, ipc, prices, poverty, source_id)
+    from app.services.sources.hapi_un import fetch_all
+    problems: list[str] = []
+    un = fetch_all(app_id, problems.append)
+    status = sync(db, ipc, prices, poverty, source_id, un)
+    return status + (f" (skipped: {'; '.join(problems)})" if problems else "")
 
 
 KIND = SourceKind.hdx_hapi
