@@ -81,7 +81,7 @@ class Classifier:
         return ((x - mean) / std).unsqueeze(0)
 
     def predict(self, image_bytes: bytes, top: int = 3) -> list[dict[str, Any]]:
-        """[{"category_id": 4, "p": 0.92}, ...] best first."""
+        """[{"category_id": 4, "p": 0.92, "shared": False}, ...] best first."""
         import torch
 
         with self._lock:
@@ -89,10 +89,24 @@ class Classifier:
             if self._model is None:
                 raise RuntimeError(self._error or "no_model")
             with torch.no_grad():
-                probs = torch.softmax(self._model(self._tensor(image_bytes)), dim=1)[0]
-        index_to_id = {c["index"]: c["category_id"] for c in self._info["categories"]}
-        best = torch.argsort(probs, descending=True)[:top].tolist()
-        return [{"category_id": index_to_id[i], "p": round(float(probs[i]), 4)} for i in best]
+                probs = torch.softmax(self._model(self._tensor(image_bytes)), dim=1)[0].tolist()
+        return expand(probs, self._info["categories"], top)
+
+
+def expand(probs: list[float], categories: list[dict[str, Any]], top: int = 3) -> list[dict[str, Any]]:
+    """Turn model outputs into category suggestions.
+
+    A model class can stand for one category ({"category_id": 4}) or a group trained together
+    ({"category_ids": [4, 5]}, e.g. blankets + winter support). A group's probability is given to each of its
+    categories with "shared": True, so the app shows both and lets the donor pick.
+    """
+    out = []
+    for c in categories:
+        ids = c.get("category_ids") or [c["category_id"]]
+        p = round(float(probs[c["index"]]), 4)
+        out += [{"category_id": cid, "p": p, "shared": len(ids) > 1} for cid in ids]
+    out.sort(key=lambda s: -s["p"])
+    return out[:top]
 
 
 classifier = Classifier(settings.CLASSIFIER_DIR)

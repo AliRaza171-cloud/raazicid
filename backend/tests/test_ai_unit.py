@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 
 from app.models.enums import FoodType
-from app.services.classifier import Classifier
+from app.services.classifier import Classifier, expand
 from app.services.doc_review import _parse
 from app.services.recommend import RiderFacts, load_size, score_rider
 from app.services.urgency import food_urgency
@@ -70,3 +70,14 @@ def test_review_parsing_handles_extra_text():
                  ' {"label": "Name", "ok": "maybe", "detail": "unclear"}]}')
     assert out["summary"] == "Looks fine"
     assert [c["ok"] for c in out["checks"]] == [True, None]
+
+
+def test_grouped_classes_expand_to_both_categories():
+    cats = [{"index": 0, "slug": "food", "category_id": 1},
+            {"index": 1, "slug": "blankets_winter", "category_ids": [4, 5]},
+            {"index": 2, "slug": "books_school", "category_ids": [10, 9]}]
+    out = expand([0.05, 0.85, 0.10], cats)
+    assert [(s["category_id"], s["shared"]) for s in out] == [(4, True), (5, True), (10, True)]
+    assert out[0]["p"] == out[1]["p"] == 0.85
+    single = expand([0.7, 0.2, 0.1], cats)
+    assert single[0] == {"category_id": 1, "p": 0.7, "shared": False}

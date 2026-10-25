@@ -9,7 +9,7 @@ import { pickPhoto, uploadPhoto, type PickedPhoto } from "../../upload";
 const MAX_PHOTOS = 5;
 
 type Photo = { key: string; uri: string; url: string | null; failed: boolean };
-type Suggestion = { category_id: number; name: string; p: number };
+type Suggestion = { category_id: number; name: string; p: number; shared?: boolean };
 type Ai = { state: "idle" | "thinking" | "done" | "off"; suggestions: Suggestion[] };
 
 const AUTO_PICK = 0.6;   // pre-select the AI's first choice when it is at least this sure
@@ -40,7 +40,9 @@ export default function DonateScreen() {
       .then((r) => {
         if (!alive) return;
         setAi({ state: "done", suggestions: r.suggestions });
-        if (!touched.current && r.suggestions[0] && r.suggestions[0].p >= AUTO_PICK) setCategoryId(r.suggestions[0].category_id);
+        // A grouped answer (e.g. blankets + winter support) could be either one: let the donor choose
+        const first = r.suggestions[0];
+        if (!touched.current && first && first.p >= AUTO_PICK && !first.shared) setCategoryId(first.category_id);
       })
       .catch(() => alive && setAi({ state: "off", suggestions: [] }));
     return () => {
@@ -131,7 +133,11 @@ export default function DonateScreen() {
       ) : ai.state === "done" && ai.suggestions.length ? (
         <View style={st.aiCard}>
           <Text style={{ fontWeight: "800", color: colors.ink }}>What is this?</Text>
-          <Text style={{ fontSize: 12, color: colors.muted }}>Our AI looked at your photo. Tap the right one, or choose another below.</Text>
+          <Text style={{ fontSize: 12, color: colors.muted }}>
+            {ai.suggestions[0]?.shared
+              ? "Our AI thinks it is one of these similar categories. Tap the right one."
+              : "Our AI looked at your photo. Tap the right one, or choose another below."}
+          </Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
             {ai.suggestions.map((sg) => {
               const on = sg.category_id === categoryId;

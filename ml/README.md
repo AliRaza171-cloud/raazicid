@@ -17,7 +17,13 @@ measure how often the AI was right on real donations.
 | Notebook | Trains on | Tests on | Result so far |
 |---|---|---|---|
 | `train_classifier.ipynb` (experiment 1) | Open Images V7 | Open Images test split (+ own photos) | 59.5% top-1, 86% top-3 |
-| `train_own_dataset.ipynb` (experiment 2) | **Our own photos** | Our own photos of **different** items | run it and fill in |
+| `train_own_dataset.ipynb` (experiment 2) | **Our own photos** | Our own photos of **different** items | |
+| `train_colab_cell.py` (simplest, one Colab cell) | Our own photos, similar categories grouped | Automatic 15% test split | 96% top-1 on 6 categories (first run) |
+
+**Simplest way:** paste `train_colab_cell.py` into one Colab cell (T4 GPU) and run it. It reads
+`MyDrive/raazicid/dataset/` (any folder layout, loose folder names, `.jfif` too) and trains
+*blankets + winter support* and *books + school supplies* as one class each, because they look alike.
+The app still keeps all 12 categories: when the model picks a group, it shows both and the donor taps one.
 
 Experiment 1 showed that Open Images labels are noisy for our task (a photo labelled "Clothing" is usually a
 person, not a pile of clothes), so experiment 2 trains on photos that look like real donations.

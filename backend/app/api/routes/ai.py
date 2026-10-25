@@ -28,6 +28,7 @@ class Suggestion(BaseModel):
     category_id: int
     name: str
     p: float
+    shared: bool = False   # the model learned this category together with another one (e.g. blankets + winter)
 
 
 class ClassifyOut(BaseModel):
@@ -80,7 +81,8 @@ def classify(body: ClassifyIn, _: User = Depends(require_roles(Role.donor, Role.
     names = {c.id: c.name for c in db.scalars(select(Category))}
     return ClassifyOut(
         model_version=classifier.version,
-        suggestions=[Suggestion(category_id=t["category_id"], name=names.get(t["category_id"], "?"), p=t["p"]) for t in top],
+        suggestions=[Suggestion(category_id=t["category_id"], name=names.get(t["category_id"], "?"), p=t["p"],
+                                shared=t.get("shared", False)) for t in top],
     )
 
 
@@ -105,13 +107,19 @@ def stats(_: User = Depends(require_roles(Role.admin)), db: Session = Depends(ge
     """How often real donors agreed with the AI. Good evidence for the thesis next to the test-set accuracy."""
     rows = list(db.scalars(select(Donation).where(Donation.ai_category_id.is_not(None))))
     names = {c.id: c.name for c in db.scalars(select(Category))}
-    top1 = sum(1 for d in rows if d.category_id == d.ai_category_id)
+    def first_choices(d: Donation) -> set:
+        # With grouped classes (blankets + winter support) several categories share the top probability
+        top = d.ai_top3 or []
+        best = top[0].get("p") if top else None
+        return {t.get("category_id") for t in top if t.get("p") == best} | {d.ai_category_id}
+
+    top1 = sum(1 for d in rows if d.category_id in first_choices(d))
     top3 = sum(1 for d in rows if d.category_id in {t.get("category_id") for t in (d.ai_top3 or [])} or d.category_id == d.ai_category_id)
     per: dict[int, list[int]] = {}
     for d in rows:
         s = per.setdefault(d.ai_category_id, [0, 0])
         s[0] += 1
-        s[1] += int(d.category_id == d.ai_category_id)
+        s[1] += int(d.category_id in first_choices(d))
     n = len(rows)
     return AiStats(
         donations_with_ai=n, top1_kept=top1, top3_hit=top3,
