@@ -44,8 +44,9 @@ def scan() -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     today = datetime.now(timezone.utc).strftime("%d %B %Y")
     res = ask(
         [{"role": "user", "content": PROMPT.format(today=today)}],
-        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 5, "allowed_domains": DOMAINS,
-                "user_location": {"type": "approximate", "country": "PK", "timezone": "Asia/Karachi"}}],
+        # No user_location: the web search tool does not accept Pakistan (PK) as a country.
+        # The prompt and the Pakistani domain list keep the search on Pakistan.
+        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 5, "allowed_domains": DOMAINS}],
         max_tokens=3000, timeout=180,
     )
     text, cites = text_and_citations(res)
