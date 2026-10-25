@@ -139,7 +139,7 @@ def donation_out(db: Session, d: Donation) -> DonationOut:
             address=d.pickup_address, lat=d.pickup_lat, lng=d.pickup_lng, location_id=d.pickup_location_id,
             location_path=location_path(db, d.pickup_location_id), from_=d.pickup_from, to=d.pickup_to,
         ),
-        point=PointRef(id=point.id, name=point.name, address=point.address,
+        point=PointRef(id=point.id, name=point.name, address=point.address, lat=point.lat, lng=point.lng,
                        location_path=location_path(db, point.location_id)) if point else None,
         reject_reason=d.reject_reason,
         photos=[i.url for i in d.images if i.kind == ImageKind.donor_photo],

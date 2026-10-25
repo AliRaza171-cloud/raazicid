@@ -6,7 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { api, type Job } from "../../api";
 import ReasonSheet from "../../components/ReasonSheet";
 import { Button, ErrorBox } from "../../components/ui";
-import { directionsUrl, windowText } from "../../status";
+import { directionsUrl, placeUrl, windowText } from "../../status";
 import { colors, space } from "../../theme";
 
 const STEPS = ["To pickup", "Picked up", "To drop-off", "Delivered"];
@@ -127,7 +127,11 @@ export default function ActiveJobScreen() {
           <Text style={{ color: colors.muted }}>{dest.area.join(", ")}</Text>
           {!toPoint ? <Text style={{ color: colors.ink2 }}>When: {windowText(job.pickup_from, job.pickup_to)}</Text> : null}
           <Text style={{ color: colors.ink2, fontWeight: "700" }}>{job.title} · {job.quantity} item{job.quantity === 1 ? "" : "s"}</Text>
-          <Button label="Navigate in Google Maps" onPress={() => Linking.openURL(directionsUrl(dest.lat, dest.lng))} />
+          <Button label={toPoint ? "Navigate to drop-off in Google Maps" : "Navigate to pickup in Google Maps"} onPress={() => Linking.openURL(directionsUrl(dest.lat, dest.lng))} />
+          {!toPoint && job.point ? (
+            <Button label={`See drop-off: ${job.point.name ?? "distribution point"}`} variant="outline"
+              onPress={() => Linking.openURL(placeUrl(job.point!.lat, job.point!.lng))} />
+          ) : null}
         </View>
 
         {job.photos.length ? (

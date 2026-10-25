@@ -213,7 +213,7 @@ export interface Donation extends DonationItem {
   prepared_at: string | null;
   urgency_reasons: { label: string; points: number }[];
   pickup: { address: string; lat: number; lng: number; location_path: string[]; from: string | null; to: string | null };
-  point: { id: string; name: string; address: string; location_path: string[] } | null;
+  point: { id: string; name: string; address: string; location_path: string[]; lat: number; lng: number } | null;
   reject_reason: string | null;
   photos: string[];
   history: { from_status: DonationStatus | null; to_status: DonationStatus; note: string | null; by_name: string | null; at: string }[];

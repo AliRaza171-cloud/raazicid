@@ -4,7 +4,7 @@ import { Linking, ScrollView, StyleSheet, Text, View } from "react-native";
 import { api, type Tracking } from "../../api";
 import MapView, { type MapData } from "../../components/MapView";
 import { Button, ErrorBox } from "../../components/ui";
-import { STATUS, minutesAgo } from "../../status";
+import { STATUS, minutesAgo, placeUrl } from "../../status";
 import { colors, space } from "../../theme";
 
 /** Where is my donation? Map with the rider, refreshed every 15 seconds while this screen is open. */
@@ -73,8 +73,13 @@ export default function TrackingScreen() {
             {t.last ? `Location updated ${minutesAgo(t.last.at)}` : "Location appears once the rider starts the job"}
             {t.stalled ? " · not moving recently" : ""}
           </Text>
+          {t.last ? <Button label="See rider in Google Maps" onPress={() => Linking.openURL(placeUrl(t.last!.lat, t.last!.lng))} /> : null}
           <Button label="Call rider" variant="outline" onPress={() => Linking.openURL(`tel:${t.rider!.phone}`)} />
         </View>
+      ) : null}
+      {t?.point ? (
+        <Button label={`Where it goes: ${t.point.name ?? "distribution point"}`} variant="outline"
+          onPress={() => Linking.openURL(placeUrl(t.point!.lat, t.point!.lng))} />
       ) : null}
       <Text style={{ fontSize: 12, color: colors.muted }}>Updates every 15 seconds. The rider's location is shared only while their job screen is open.</Text>
     </ScrollView>

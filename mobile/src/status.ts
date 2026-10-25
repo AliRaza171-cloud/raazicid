@@ -44,6 +44,11 @@ export function directionsUrl(lat: number, lng: number): string {
   return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
 }
 
+/** Opens a spot in the Google Maps app (no API key needed). */
+export function placeUrl(lat: number, lng: number): string {
+  return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+}
+
 /** Straight-line distance in km. */
 export function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const r = (d: number) => (d * Math.PI) / 180;

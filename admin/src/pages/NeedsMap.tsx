@@ -1,21 +1,40 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../components/Layout";
 import LiveMap, { type MapMarker } from "../components/LiveMap";
-import { api, type AreaNeed, type AreaNeeds, type AreaRow, type Category } from "../lib/api";
-import { LEVELS, SHORT_CAT, ago } from "../lib/format";
+import { api, type AreaNeed, type AreaNeeds, type AreaRow, type Category, type Point } from "../lib/api";
+import { LEVELS, SHORT_CAT, ago, pointTypeLabel } from "../lib/format";
 
 const DOT = ["#9aa39e", "#d4a800", "#d9772b", "#a2361a"];
+const POINT_COLOR = "#2449A8";
+const CAMP_COLOR = "#7c3aed";
+const GAP_RING = "#a2361a";
+// A place in high or urgent need is a "coverage gap" when no open point that takes the item is this close
+const GAP_KM: Record<string, number> = { city: 30, region: 30, area: 10 };
 
 type Crumb = { id: string | null; name: string };
 type Picked = { place: string; need: AreaNeed };
+type Nearest = { point: Point; km: number } | null;
+type Gap = { row: AreaRow; level: number; need: string; nearest: Nearest; why: string };
+
+function km(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const r = (d: number) => (d * Math.PI) / 180;
+  const h = Math.sin(r(b.lat - a.lat) / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(r(b.lng - a.lng) / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+}
+
+const takes = (p: Point, categoryId: number | null) => categoryId === null || p.categories.length === 0 || p.categories.some((c) => c.id === categoryId);
 
 export default function NeedsMap() {
   const [trail, setTrail] = useState<Crumb[]>([{ id: null, name: "Pakistan" }]);
   const [data, setData] = useState<AreaNeeds | null>(null);
   const [cats, setCats] = useState<Category[]>([]);
+  const [points, setPoints] = useState<Point[]>([]);
   const [view, setView] = useState<"grid" | "map">("grid");
+  const [categoryId, setCategoryId] = useState<number | null>(null);   // map colour and gaps for one category, or all
   const [picked, setPicked] = useState<Picked | null>(null);
+  const [focusRow, setFocusRow] = useState<string | null>(null);      // place clicked on the map
+  const [focusPoint, setFocusPoint] = useState<string | null>(null);  // point clicked on the map
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,17 +50,24 @@ export default function NeedsMap() {
   useEffect(load, [load]);
   useEffect(() => {
     api<Category[]>("/categories").then(setCats).catch(() => undefined);
+    api<Point[]>("/points?open_only=true").then(setPoints).catch(() => undefined);
   }, []);
+
+  const clearFocus = () => {
+    setPicked(null);
+    setFocusRow(null);
+    setFocusPoint(null);
+  };
 
   const open = (row: AreaRow) => {
     if (!row.has_children) return;
-    setPicked(null);
+    clearFocus();
     setData(null);
     setTrail((t) => [...t, { id: row.id, name: row.name }]);
   };
 
   const back = (i: number) => {
-    setPicked(null);
+    clearFocus();
     setData(null);
     setTrail((t) => t.slice(0, i + 1));
   };
@@ -58,16 +84,81 @@ export default function NeedsMap() {
     }
   };
 
-  const markers: MapMarker[] = (data?.children ?? [])
-    .filter((r) => r.lat !== null && r.lng !== null)
-    .map((r) => ({
-      id: r.id, lat: r.lat as number, lng: r.lng as number, kind: "point", color: DOT[r.max_level], size: 14 + r.max_level * 4,
-      label: `${r.name}: ${r.max_level ? r.needs.filter((n) => n.level >= 2).map((n) => n.name).join(", ") || LEVELS[r.max_level].label : "no signal"}`,
-    }));
+  // Level of a place for the chosen category (or its highest level)
+  const levelOf = useCallback(
+    (row: AreaRow) => (categoryId === null ? row.max_level : row.needs.find((n) => n.category_id === categoryId)?.level ?? 0),
+    [categoryId],
+  );
+
+  const nearestFor = useCallback(
+    (row: AreaRow, cat: number | null): Nearest => {
+      if (row.lat === null || row.lng === null) return null;
+      let best: Nearest = null;
+      for (const p of points) {
+        if (!takes(p, cat)) continue;
+        const d = km({ lat: row.lat, lng: row.lng }, p);
+        if (!best || d < best.km) best = { point: p, km: d };
+      }
+      return best;
+    },
+    [points],
+  );
+
+  // Places in high or urgent need with no suitable open point nearby
+  const gaps: Gap[] = useMemo(() => {
+    if (!data) return [];
+    const out: Gap[] = [];
+    for (const row of data.children) {
+      const lv = levelOf(row);
+      if (lv < 2) continue;
+      const need = categoryId === null ? row.needs[0] : row.needs.find((n) => n.category_id === categoryId);
+      if (!need) continue;
+      const cat = categoryId ?? need.category_id;
+      if (row.level === "province") {
+        const inside = points.filter((p) => p.location_path[0] === row.name && takes(p, cat));
+        if (inside.length === 0) out.push({ row, level: lv, need: need.name, nearest: nearestFor(row, cat), why: `No open point in ${row.name} takes ${need.name.toLowerCase()}` });
+        continue;
+      }
+      const nearest = nearestFor(row, cat);
+      const limit = GAP_KM[row.level] ?? 30;
+      if (!nearest || nearest.km > limit) {
+        out.push({ row, level: lv, need: need.name, nearest,
+          why: nearest ? `Nearest point for ${need.name.toLowerCase()} is ${Math.round(nearest.km)} km away` : `No open point takes ${need.name.toLowerCase()}` });
+      }
+    }
+    return out.sort((a, b) => b.level - a.level || (b.nearest?.km ?? 1e9) - (a.nearest?.km ?? 1e9));
+  }, [data, points, categoryId, levelOf, nearestFor]);
+
+  const gapIds = new Set(gaps.map((g) => g.row.id));
+  const pointsHere = points.filter((p) => !here.id || p.location_path.includes(here.name));
+
+  const markers: MapMarker[] = [
+    ...(data?.children ?? [])
+      .filter((r) => r.lat !== null && r.lng !== null)
+      .map((r) => {
+        const lv = levelOf(r);
+        const top = r.needs.filter((n) => n.level >= 2).map((n) => n.name);
+        return {
+          id: r.id, lat: r.lat as number, lng: r.lng as number, kind: "point" as const, color: DOT[lv], size: 14 + lv * 5,
+          ring: gapIds.has(r.id) ? GAP_RING : undefined, selected: focusRow === r.id,
+          label: `${r.name}: ${LEVELS[lv].label}${categoryId === null && top.length ? ` (${top.slice(0, 3).join(", ")})` : ""}${gapIds.has(r.id) ? " · no point nearby" : ""}`,
+          onClick: () => { setFocusPoint(null); setPicked(null); setFocusRow(r.id); },
+        };
+      }),
+    ...pointsHere.map((p) => ({
+      id: `p-${p.id}`, lat: p.lat, lng: p.lng, kind: "point" as const, square: true, size: 14,
+      color: p.type === "relief_camp" ? CAMP_COLOR : POINT_COLOR, selected: focusPoint === p.id,
+      label: `${p.name} (${pointTypeLabel(p.type)})`,
+      onClick: () => { setFocusRow(null); setPicked(null); setFocusPoint(p.id); },
+    })),
+  ];
+
+  const row = data?.children.find((r) => r.id === focusRow) ?? null;
+  const point = points.find((p) => p.id === focusPoint) ?? null;
 
   return (
     <>
-      <PageHeader title="Needs by area" sub="What each area needs across all 12 categories, worked out from IPC, food prices, poverty, disasters and point requests.">
+      <PageHeader title="Needs by area" sub="What each area needs, worked out from IPC, food prices, poverty, disasters and point requests, and whether we have a point nearby.">
         <span className="muted small">Updated {ago(data?.computed_at ?? null)}</span>
         <button className="btn ghost small" onClick={recompute} disabled={busy}>{busy ? "Working…" : "Recompute now"}</button>
       </PageHeader>
@@ -81,7 +172,12 @@ export default function NeedsMap() {
               </span>
             ))}
           </nav>
-          <div className="tabs" role="tablist" style={{ marginLeft: "auto" }}>
+          <select className="select" style={{ marginLeft: "auto" }} aria-label="Category" value={categoryId ?? ""}
+            onChange={(e) => { setCategoryId(e.target.value ? Number(e.target.value) : null); setPicked(null); }}>
+            <option value="">All categories</option>
+            {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <div className="tabs" role="tablist">
             <button role="tab" aria-selected={view === "grid"} className={view === "grid" ? "btn small" : "btn ghost small"} onClick={() => setView("grid")}>Grid</button>
             <button role="tab" aria-selected={view === "map"} className={view === "map" ? "btn small" : "btn ghost small"} onClick={() => setView("map")}>Map</button>
           </div>
@@ -89,7 +185,16 @@ export default function NeedsMap() {
 
         <div className="legend">
           {LEVELS.map((l) => <span key={l.label}><span className={`sw ${l.cls}`} />{l.label}</span>)}
-          <span className="muted">· Click a coloured cell to see why. Click a place name to look inside it.</span>
+          {view === "map" ? (
+            <>
+              <span><span className="sw" style={{ background: POINT_COLOR, borderRadius: 4 }} />Distribution point</span>
+              <span><span className="sw" style={{ background: CAMP_COLOR, borderRadius: 4 }} />Relief camp</span>
+              <span><span className="sw" style={{ background: "#fff", boxShadow: `0 0 0 2px ${GAP_RING}`, borderRadius: 9 }} />No point nearby</span>
+              <span className="muted">· Click a place or a point.</span>
+            </>
+          ) : (
+            <span className="muted">· Click a coloured cell to see why. Click a place name to look inside it.</span>
+          )}
         </div>
 
         {error && <div className="flash bad" role="alert">{error}</div>}
@@ -99,37 +204,41 @@ export default function NeedsMap() {
             {data === null ? (
               <p className="muted" style={{ padding: 12 }}>Loading…</p>
             ) : view === "map" ? (
-              <LiveMap key={here.id ?? "pk"} markers={markers} height={520} />
+              <LiveMap key={here.id ?? "pk"} markers={markers} height={540} />
             ) : (
               <table className="needs-grid">
                 <thead>
                   <tr>
                     <th className="place">Place</th>
-                    {cats.map((c) => <th key={c.id} title={c.name}>{SHORT_CAT[c.id] ?? c.name}</th>)}
+                    {cats.map((c) => <th key={c.id} title={c.name} style={categoryId === c.id ? { color: "var(--ink)" } : undefined}>{SHORT_CAT[c.id] ?? c.name}</th>)}
                   </tr>
                 </thead>
                 <tbody>
-                  {data.children.map((row) => {
-                    const byCat = new Map(row.needs.map((n) => [n.category_id, n]));
+                  {data.children.map((r) => {
+                    const byCat = new Map(r.needs.map((n) => [n.category_id, n]));
                     return (
-                      <tr key={row.id}>
+                      <tr key={r.id}>
                         <td className="place">
-                          {row.has_children ? (
-                            <button onClick={() => open(row)} style={{ border: 0, background: "none", font: "inherit", fontWeight: 700, cursor: "pointer", padding: 0, color: "var(--ink)", textAlign: "left" }}>
-                              {row.name} ›
+                          {r.has_children ? (
+                            <button onClick={() => open(r)} style={{ border: 0, background: "none", font: "inherit", fontWeight: 700, cursor: "pointer", padding: 0, color: "var(--ink)", textAlign: "left" }}>
+                              {r.name} ›
                             </button>
                           ) : (
-                            <strong>{row.name}</strong>
+                            <strong>{r.name}</strong>
                           )}
-                          <div className="muted small" style={{ textTransform: "capitalize" }}>{row.level}</div>
+                          <div className="muted small" style={{ textTransform: "capitalize" }}>
+                            {r.level}{gapIds.has(r.id) && <span style={{ color: "var(--urgent)", fontWeight: 700, textTransform: "none" }}> · no point nearby</span>}
+                          </div>
                         </td>
                         {cats.map((c) => {
                           const n = byCat.get(c.id);
                           const lv = n?.level ?? 0;
-                          const sel = picked?.place === row.name && picked.need.category_id === c.id;
+                          const sel = picked?.place === r.name && picked.need.category_id === c.id;
+                          const dim = categoryId !== null && categoryId !== c.id;
                           return (
                             <td key={c.id} className={`cell lv${lv}${sel ? " sel" : ""}`} title={n ? `${c.name}: ${n.level_name}` : c.name}
-                              onClick={() => n && setPicked({ place: row.name, need: n })}>
+                              style={dim ? { opacity: 0.35 } : undefined}
+                              onClick={() => { if (n) { setFocusRow(null); setFocusPoint(null); setPicked({ place: r.name, need: n }); } }}>
                               {lv ? LEVELS[lv].label : ""}
                             </td>
                           );
@@ -143,54 +252,178 @@ export default function NeedsMap() {
             {data && data.children.length === 0 && <p className="muted" style={{ padding: 12 }}>No places listed here.</p>}
           </section>
 
-          <aside className="card" style={{ flex: "1 1 300px", display: "flex", flexDirection: "column", gap: 12 }} aria-label="Why">
+          <aside className="card" style={{ flex: "1 1 300px", display: "flex", flexDirection: "column", gap: 12 }} aria-label="Details">
             {picked ? (
-              <>
-                <div>
-                  <span className={`chip ${LEVELS[picked.need.level].cls}`}>{LEVELS[picked.need.level].label} · {picked.need.score}</span>
-                  <h2 style={{ margin: "8px 0 0", fontSize: 18 }}>{picked.need.name} in {picked.place}</h2>
-                </div>
-                <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 10 }}>
-                  {picked.need.reasons.map((r, i) => (
-                    <li key={i}>
-                      <div style={{ fontWeight: 600 }}>{r.why}</div>
-                      <div className="muted small">
-                        {r.source}{r.date ? ` · ${r.date}` : ""}{r.place && r.place !== picked.place ? ` · in ${r.place}` : ""} · {r.points} points
-                      </div>
-                      {r.alert_id && <Link className="small" to={`/disasters?id=${r.alert_id}`}>Open the alert</Link>}
-                    </li>
-                  ))}
-                </ul>
-                <p className="muted small" style={{ margin: 0 }}>
-                  Score = the strongest reason, plus 5 for each other strong one. 80+ urgent, 55+ high, 30+ some.
-                </p>
-              </>
+              <Reasons picked={picked} />
+            ) : row ? (
+              <PlacePanel row={row} categoryId={categoryId} levelOf={levelOf} nearest={nearestFor(row, categoryId ?? row.needs[0]?.category_id ?? null)}
+                gap={gaps.find((g) => g.row.id === row.id) ?? null}
+                onReason={(n) => setPicked({ place: row.name, need: n })} onOpen={() => open(row)} />
+            ) : point ? (
+              <PointPanel p={point} />
             ) : (
-              <>
-                <h2 style={{ margin: 0, fontSize: 18 }}>{here.name}</h2>
-                {data?.summary && data.summary.length > 0 ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <span className="muted small">Top needs anywhere inside {here.name}</span>
-                    {data.summary.slice(0, 6).map((n) => (
-                      <button key={n.category_id} onClick={() => setPicked({ place: here.name, need: n })}
-                        style={{ display: "flex", justifyContent: "space-between", border: "1px solid var(--line)", borderRadius: 10, background: "#fff", padding: "8px 10px", font: "inherit", cursor: "pointer" }}>
-                        <span>{n.name}</span><span className={`chip ${LEVELS[n.level].cls}`}>{LEVELS[n.level].label}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="muted" style={{ margin: 0 }}>
-                    {here.id ? "No need signals here yet." : "Pick a coloured cell to see the reasons and sources behind it."}
-                  </p>
-                )}
-                <p className="muted small" style={{ margin: 0 }}>
-                  Data: IPC food insecurity, WFP food prices and poverty rates (HDX, daily), GDACS and news alerts (every 30 min), and what people ask for at our distribution points.
-                </p>
-              </>
+              <Summary here={here} data={data} onPick={(n) => setPicked({ place: here.name, need: n })} />
             )}
           </aside>
         </div>
+
+        <section className="card" style={{ padding: 0 }}>
+          <div style={{ padding: "16px 18px 0" }}>
+            <h2 style={{ margin: 0, fontSize: 16 }}>
+              Coverage gaps{categoryId !== null ? ` for ${cats.find((c) => c.id === categoryId)?.name.toLowerCase()}` : ""} in {here.name}
+            </h2>
+            <p className="muted small" style={{ margin: "2px 0 0" }}>
+              High or urgent need, but no open point that takes the item within {GAP_KM.city} km (10 km for an area). These are the places to open a point or a relief camp.
+            </p>
+          </div>
+          {gaps.length === 0 ? (
+            <p className="muted" style={{ padding: "10px 18px 16px", margin: 0 }}>
+              {data ? "No gaps: every place in high or urgent need has a point nearby." : "Loading…"}
+            </p>
+          ) : (
+            <table className="table">
+              <thead><tr><th>Place</th><th>Need</th><th>Why it is a gap</th><th /></tr></thead>
+              <tbody>
+                {gaps.map((g) => (
+                  <tr key={g.row.id}>
+                    <td><strong>{g.row.name}</strong><div className="muted small" style={{ textTransform: "capitalize" }}>{g.row.level}</div></td>
+                    <td><span className={`chip lv${g.level}`}>{LEVELS[g.level].label}</span> {g.need}</td>
+                    <td>{g.why}{g.nearest && <div className="muted small">Nearest: {g.nearest.point.name}</div>}</td>
+                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                      {g.row.lat !== null && (
+                        <button className="btn ghost small" onClick={() => { setView("map"); setPicked(null); setFocusPoint(null); setFocusRow(g.row.id); }}>Show on map</button>
+                      )}{" "}
+                      {g.row.has_children && <button className="btn ghost small" onClick={() => open(g.row)}>Look inside</button>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
       </main>
+    </>
+  );
+}
+
+function Reasons({ picked }: { picked: Picked }) {
+  return (
+    <>
+      <div>
+        <span className={`chip lv${picked.need.level}`}>{LEVELS[picked.need.level].label} · {picked.need.score}</span>
+        <h2 style={{ margin: "8px 0 0", fontSize: 18 }}>{picked.need.name} in {picked.place}</h2>
+      </div>
+      <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 10 }}>
+        {picked.need.reasons.map((r, i) => (
+          <li key={i}>
+            <div style={{ fontWeight: 600 }}>{r.why}</div>
+            <div className="muted small">
+              {r.source}{r.date ? ` · ${r.date}` : ""}{r.place && r.place !== picked.place ? ` · in ${r.place}` : ""} · {r.points} points
+            </div>
+            {r.alert_id && <Link className="small" to={`/disasters?id=${r.alert_id}`}>Open the alert</Link>}
+          </li>
+        ))}
+      </ul>
+      <p className="muted small" style={{ margin: 0 }}>Score = the strongest reason, plus 5 for each other strong one. 80+ urgent, 55+ high, 30+ some.</p>
+    </>
+  );
+}
+
+function PlacePanel({ row, categoryId, levelOf, nearest, gap, onReason, onOpen }: {
+  row: AreaRow;
+  categoryId: number | null;
+  levelOf: (r: AreaRow) => number;
+  nearest: Nearest;
+  gap: Gap | null;
+  onReason: (n: AreaNeed) => void;
+  onOpen: () => void;
+}) {
+  const lv = levelOf(row);
+  const needs = row.needs.filter((n) => n.level > 0 && (categoryId === null || n.category_id === categoryId));
+  return (
+    <>
+      <div>
+        <span className={`chip lv${lv}`}>{LEVELS[lv].label}</span>
+        <h2 style={{ margin: "8px 0 0", fontSize: 18 }}>{row.name}</h2>
+        <span className="muted small" style={{ textTransform: "capitalize" }}>{row.level}</span>
+      </div>
+      {gap && (
+        <div className="flash bad" style={{ fontWeight: 600 }}>
+          Coverage gap: {gap.why}.
+          <div style={{ fontWeight: 500, marginTop: 4 }}>Open a distribution point, or a relief camp if there is a disaster here.</div>
+        </div>
+      )}
+      {needs.length === 0 ? (
+        <p className="muted" style={{ margin: 0 }}>No need signals here{categoryId !== null ? " for this category" : ""}.</p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {needs.slice(0, 6).map((n) => (
+            <button key={n.category_id} onClick={() => onReason(n)}
+              style={{ display: "flex", justifyContent: "space-between", gap: 8, border: "1px solid var(--line)", borderRadius: 10, background: "#fff", padding: "8px 10px", font: "inherit", cursor: "pointer", textAlign: "left" }}>
+              <span>{n.name}<div className="muted small">{n.reasons[0]?.why}</div></span>
+              <span className={`chip lv${n.level}`}>{LEVELS[n.level].label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="muted small">
+        {nearest ? <>Nearest open point: <strong style={{ color: "var(--ink)" }}>{nearest.point.name}</strong>, {Math.round(nearest.km)} km</> : "No open distribution point takes this yet."}
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {row.has_children && <button className="btn small" onClick={onOpen}>Look inside {row.name}</button>}
+        <Link className="btn ghost small" to="/points">Distribution points</Link>
+        <Link className="btn ghost small" to="/disasters">Disaster alerts</Link>
+      </div>
+    </>
+  );
+}
+
+function PointPanel({ p }: { p: Point }) {
+  return (
+    <>
+      <div>
+        <span className="chip info">{pointTypeLabel(p.type)}</span>
+        <h2 style={{ margin: "8px 0 0", fontSize: 18 }}>{p.name}</h2>
+        <span className="muted small">{p.address} · {p.location_path.slice(-2).join(", ")}</span>
+      </div>
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+        {p.same_day_food && <span className="chip ok">Same-day food</span>}
+        {p.categories.length === 0 ? <span className="chip wait">Takes everything</span> : p.categories.map((c) => <span key={c.id} className="chip wait">{c.name}</span>)}
+      </div>
+      <div style={{ display: "flex", gap: 20 }}>
+        <div><div className="kpi-label">Last 30 days</div><div style={{ fontSize: 20, fontWeight: 800 }}>{p.items_30d} items</div></div>
+        <div><div className="kpi-label">Open requests</div><div style={{ fontSize: 20, fontWeight: 800 }}>{p.open_requests}</div></div>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <Link className="btn ghost small" to="/points">Manage points</Link>
+        <a className="btn ghost small" href={`https://www.google.com/maps?q=${p.lat},${p.lng}`} target="_blank" rel="noreferrer">Google Maps</a>
+      </div>
+    </>
+  );
+}
+
+function Summary({ here, data, onPick }: { here: Crumb; data: AreaNeeds | null; onPick: (n: AreaNeed) => void }) {
+  return (
+    <>
+      <h2 style={{ margin: 0, fontSize: 18 }}>{here.name}</h2>
+      {data?.summary && data.summary.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span className="muted small">Top needs anywhere inside {here.name}</span>
+          {data.summary.slice(0, 6).map((n) => (
+            <button key={n.category_id} onClick={() => onPick(n)}
+              style={{ display: "flex", justifyContent: "space-between", border: "1px solid var(--line)", borderRadius: 10, background: "#fff", padding: "8px 10px", font: "inherit", cursor: "pointer" }}>
+              <span>{n.name}</span><span className={`chip lv${n.level}`}>{LEVELS[n.level].label}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="muted" style={{ margin: 0 }}>
+          {here.id ? "No need signals here yet." : "Click a place on the map or a coloured cell in the grid to see the reasons and sources behind it."}
+        </p>
+      )}
+      <p className="muted small" style={{ margin: 0 }}>
+        Data: IPC food insecurity, WFP food prices and poverty rates (HDX, daily), GDACS and news alerts (every 30 min), and what people ask for at our distribution points.
+      </p>
     </>
   );
 }

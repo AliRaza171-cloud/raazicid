@@ -2,7 +2,19 @@
 // No API key: OpenStreetMap tiles first; if they fail, Esri's free street map instead.
 import { useEffect, useRef } from "react";
 
-export type MapMarker = { id: string; lat: number; lng: number; label: string; kind: "pickup" | "point" | "rider" | "stalled"; color?: string; size?: number };
+export type MapMarker = {
+  id: string;
+  lat: number;
+  lng: number;
+  label: string;
+  kind: "pickup" | "point" | "rider" | "stalled";
+  color?: string;
+  size?: number;
+  square?: boolean;        // distribution points; places are round
+  ring?: string;           // outline colour, e.g. a coverage gap
+  selected?: boolean;
+  onClick?: () => void;
+};
 export type MapLine = { id: string; points: { lat: number; lng: number }[] };
 
 const COLORS = { pickup: "#0F6B5C", point: "#2449A8", rider: "#D97706", stalled: "#A2361A" };
@@ -95,13 +107,15 @@ export default function LiveMap({
     const pts: [number, number][] = [];
     for (const m of markers) {
       const size = m.size ?? (m.kind === "rider" || m.kind === "stalled" ? 20 : 16);
+      const shadow = [m.ring ? `0 0 0 3px ${m.ring}` : "", m.selected ? "0 0 0 6px rgba(24,32,29,.35)" : "", "0 1px 4px rgba(0,0,0,.4)"].filter(Boolean).join(",");
       const icon = L.divIcon({
         className: "",
-        html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${m.color ?? COLORS[m.kind]};border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>`,
+        html: `<div style="width:${size}px;height:${size}px;border-radius:${m.square ? "5px" : "50%"};background:${m.color ?? COLORS[m.kind]};border:3px solid #fff;box-shadow:${shadow};cursor:${m.onClick ? "pointer" : "default"}"></div>`,
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2],
       });
-      L.marker([m.lat, m.lng], { icon }).bindTooltip(m.label).addTo(layer.current);
+      const mk = L.marker([m.lat, m.lng], { icon, zIndexOffset: m.square ? 500 : m.selected ? 1000 : 0 }).bindTooltip(m.label).addTo(layer.current);
+      if (m.onClick) mk.on("click", m.onClick);
       pts.push([m.lat, m.lng]);
     }
     if (!fitted.current && pts.length) {

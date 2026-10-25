@@ -223,6 +223,7 @@ export default function DonationDetail() {
                     <dd style={{ margin: 0 }}>
                       <strong>{d.point.name}</strong>
                       <div className="muted small">{d.point.address} · {d.point.location_path.slice(-2).join(", ")}</div>
+                      <a className="small" href={`https://www.google.com/maps?q=${d.point.lat},${d.point.lng}`} target="_blank" rel="noreferrer">Open in Google Maps</a>
                     </dd>
                   </>
                 )}

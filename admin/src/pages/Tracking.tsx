@@ -70,6 +70,7 @@ export default function Tracking() {
                   </span>
                   <span style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
                     {i.last && <button className="btn ghost small" onClick={() => setFocus({ lat: i.last!.lat, lng: i.last!.lng })}>Show on map</button>}
+                    {i.last && <a className="btn ghost small" href={`https://www.google.com/maps?q=${i.last.lat},${i.last.lng}`} target="_blank" rel="noreferrer">Google Maps</a>}
                     <a className="btn ghost small" href={`tel:${i.rider_phone}`}>Call rider</a>
                     <Link className="btn ghost small" to={`/donations/${i.donation_id}`}>Open {i.donation_ref}</Link>
                   </span>

@@ -101,6 +101,8 @@ class PointRef(BaseModel):
     name: str
     address: str
     location_path: list[str]
+    lat: float
+    lng: float
 
 
 class HistoryItem(BaseModel):
