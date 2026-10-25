@@ -117,6 +117,22 @@ Everything works without these; the AI parts switch on when they are set up.
 
 Restart the backend. The admin Dashboard's **AI** card shows what is ready.
 
+### 6. Needs and disaster data (Phase 6)
+
+In the backend venv:
+```powershell
+pip install -r requirements.txt     # adds apscheduler (background fetching)
+python -m app.seed.run              # adds map coordinates for provinces and cities
+```
+Add to `backend/.env`:
+```
+HDX_EMAIL=you@example.com           # HDX HAPI needs an email to identify the app (free, no sign-up)
+WEB_SCAN_EVERY_HOURS=0              # 0 = Claude news scan only when you press "Scan news now"
+```
+While the backend runs it fetches GDACS every 30 minutes and HDX (IPC, food prices, poverty) once a day,
+then recomputes need levels. Admin web: **Disaster alerts** (check, confirm, open a relief camp, data sources)
+and **Needs by area**. Donor app: **Alerts** tab, the Home banner and "What is needed where".
+
 ---
 
 ## Working together
@@ -134,7 +150,8 @@ Restart the backend. The admin Dashboard's **AI** card shows what is ready.
 - [x] Phase 3 — donations and distribution points (donate flow, admin review, points and requests)
 - [x] Phase 4 — pickup, delivery, tracking (assign rider, proofs with GPS checks, hand-out, live map)
 - [x] Phase 5 — AI: photo classifier (PyTorch), rider score, urgency v2, Claude document check
-- [ ] Phase 6 — RAG need finder, needs by area, disaster alerts
+- [x] Phase 6A — needs by area, disaster alerts (GDACS, HDX, Claude web scan), relief camps
+- [ ] Phase 6B — report library, RAG need finder, appeals, ReliefWeb
 - [ ] Phase 7 — seasonal suggestions
 - [ ] Phase 8 — analytics, fraud flags, ratings
 - [ ] Phase 9 — testing, evaluation, deployment

@@ -1,7 +1,7 @@
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useCallback, useState } from "react";
 import { Image, Pressable, Text, View } from "react-native";
-import { api, type DonationListItem } from "../../api";
+import { api, type DisasterAlert, type DonationListItem } from "../../api";
 import { useAuth } from "../../auth";
 import { Button, Card, ComingIn, ErrorBox, Screen } from "../../components/ui";
 import { STATUS, shortDate } from "../../status";
@@ -12,6 +12,7 @@ export default function HomeScreen() {
   const { user } = useAuth();
   const [active, setActive] = useState<DonationListItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [alert, setAlert] = useState<DisasterAlert | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -21,7 +22,17 @@ export default function HomeScreen() {
           setError(null);
         })
         .catch((e) => setError(e.message));
-    }, []),
+      // Phase 6: the most serious confirmed disaster, preferring the donor's own province
+      api<DisasterAlert[]>("/alerts")
+        .then((list) => {
+          const serious = list.filter((a) => a.severity !== "watch");
+          const home = user?.location_path[0];
+          setAlert(serious.find((a) => a.severity === "severe" && a.places.some((p) => p.path[0] === home))
+            ?? serious.find((a) => a.places.some((p) => p.path[0] === home))
+            ?? serious.find((a) => a.severity === "severe") ?? null);
+        })
+        .catch(() => setAlert(null));
+    }, [user]),
   );
 
   const firstName = user?.full_name.split(" ")[0] ?? "there";
@@ -39,6 +50,19 @@ export default function HomeScreen() {
           <Text style={{ color: colors.primary, fontWeight: "800", fontSize: 16 }}>Donate now</Text>
         </Pressable>
       </View>
+
+      {alert ? (
+        <Pressable accessibilityRole="button" accessibilityHint="Opens disaster alerts" onPress={() => navigation.navigate("Alerts")}
+          style={{ backgroundColor: alert.severity === "severe" ? colors.urgent : colors.warnSoft, borderRadius: 16, padding: 16, gap: 4 }}>
+          <Text style={{ color: alert.severity === "severe" ? "#FFD9CC" : colors.warn, fontSize: 12, fontWeight: "800" }}>
+            {alert.severity === "severe" ? "EMERGENCY" : "DISASTER ALERT"}
+          </Text>
+          <Text style={{ color: alert.severity === "severe" ? "#fff" : colors.ink, fontSize: 17, fontWeight: "800" }}>{alert.title}</Text>
+          <Text style={{ color: alert.severity === "severe" ? "#FCE8E1" : colors.ink2 }}>
+            {alert.needs.length ? `Needed: ${alert.needs.slice(0, 3).map((n) => n.name.toLowerCase()).join(", ")}. ` : ""}Tap to see how you can help ›
+          </Text>
+        </Pressable>
+      ) : null}
 
       <ErrorBox message={error} />
 
@@ -68,7 +92,7 @@ export default function HomeScreen() {
       ) : null}
 
       <Button label="What is needed where" variant="outline" onPress={() => navigation.navigate("Needs")} />
-      <ComingIn phase={7} what="'Most needed now' seasonal card and emergency appeals." />
+      <ComingIn phase={7} what="'Most needed now' seasonal card." />
     </Screen>
   );
 }

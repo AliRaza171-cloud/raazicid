@@ -50,3 +50,24 @@ export function distanceKm(a: { lat: number; lng: number }, b: { lat: number; ln
   const h = Math.sin(r(b.lat - a.lat) / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(r(b.lng - a.lng) / 2) ** 2;
   return 6371 * 2 * Math.asin(Math.sqrt(h));
 }
+
+// ---------- Phase 6 ----------
+
+/** Need levels: 0 none, 1 some, 2 high, 3 urgent */
+export const LEVEL = [
+  { label: "None", bg: "#F0F2EE", fg: "#6B746F" },
+  { label: "Some", bg: "#FBF3D6", fg: "#6D5600" },
+  { label: "High", bg: "#FBDCC0", fg: "#8A3F00" },
+  { label: "Urgent", bg: "#A2361A", fg: "#FFFFFF" },
+];
+
+export const SEVERITY: Record<string, { label: string; bg: string; fg: string }> = {
+  severe: { label: "Severe", bg: "#A2361A", fg: "#FFFFFF" },
+  moderate: { label: "Moderate", bg: "#FDF0DD", fg: "#8A4B00" },
+  watch: { label: "Watch", bg: "#E4ECFB", fg: "#2449A8" },
+};
+
+export const FIGURE_LABELS: Record<string, string> = {
+  people_affected: "people affected", families_affected: "families affected", deaths: "deaths",
+  injured: "injured", houses_damaged: "houses damaged",
+};

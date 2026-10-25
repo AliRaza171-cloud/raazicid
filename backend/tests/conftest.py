@@ -6,6 +6,8 @@ named "test"). Every test run drops and recreates all tables there. Never use yo
 
 import os
 
+os.environ["ENABLE_SCHEDULER"] = "false"   # no background fetching during tests
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text

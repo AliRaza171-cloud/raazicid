@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { PageHeader, ComingIn } from "../components/Layout";
 import { api, API_URL, type AiStats, type AiStatus, type Category, type LocationItem } from "../lib/api";
 
@@ -13,6 +14,7 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [ai, setAi] = useState<AiStatus | null>(null);
   const [aiStats, setAiStats] = useState<AiStats | null>(null);
+  const [waiting, setWaiting] = useState(0);
 
   useEffect(() => {
     api<Health>("/health")
@@ -25,6 +27,7 @@ export default function Dashboard() {
     api<LocationItem[]>("/locations").then(setProvinces).catch(() => undefined);
     api<AiStatus>("/ai/status").then(setAi).catch(() => undefined);
     api<AiStats>("/admin/ai/stats").then(setAiStats).catch(() => undefined);
+    api<Record<string, number>>("/admin/alerts/counts").then((c) => setWaiting(c.unconfirmed ?? 0)).catch(() => undefined);
   }, []);
 
   const chip = (ok: boolean | null) =>
@@ -34,6 +37,12 @@ export default function Dashboard() {
     <>
       <PageHeader title="Dashboard" sub="Phase 1 setup check: is everything connected?" />
       <main className="page">
+        {waiting > 0 && (
+          <div className="flash" style={{ background: "var(--warn-bg)", color: "var(--warn)", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ marginRight: "auto" }}>{waiting} disaster alert{waiting > 1 ? "s" : ""} found automatically, waiting to be checked.</span>
+            <Link className="btn small" to="/disasters">Check now</Link>
+          </div>
+        )}
         <section className="grid-kpi">
           <div className="card">
             <div className="kpi-label">Backend API</div>

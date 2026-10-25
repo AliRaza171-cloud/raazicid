@@ -1,10 +1,23 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import admin_donations, admin_riders, ai, auth, donations, health, me, points, reference, rider
+from app.api.routes import admin_donations, admin_riders, ai, alerts, auth, donations, health, me, needs, points, reference, rider
 from app.core.config import settings
+from app.scheduler import start as start_scheduler
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    scheduler = start_scheduler()   # Phase 6: fetch GDACS / HDX data and refresh need levels in the background
+    yield
+    if scheduler:
+        scheduler.shutdown(wait=False)
+
 
 app = FastAPI(
+    lifespan=lifespan,
     title=settings.APP_NAME,
     version="0.1.0",
     description="Backend for RAAZICID: AI-guided donation collection and distribution in Pakistan.",
@@ -31,6 +44,8 @@ app.include_router(points.router, prefix=API_PREFIX)
 app.include_router(rider.router, prefix=API_PREFIX)
 app.include_router(ai.router, prefix=API_PREFIX)
 app.include_router(admin_donations.tracking_router, prefix=API_PREFIX)
+app.include_router(needs.router, prefix=API_PREFIX)
+app.include_router(alerts.router, prefix=API_PREFIX)
 
 # Phase 3+: donations, points
 # Phase 4+: jobs, tracking, notifications

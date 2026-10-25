@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.models import Category, Location, SeasonalRule, Source
 from app.models.enums import LocationLevel, SourceKind
-from app.seed.data import CATEGORIES, CITY_REGIONS, PROVINCES, SEASONAL_RULES, SOURCES
+from app.seed.data import CATEGORIES, CITY_REGIONS, PLACE_COORDS, PROVINCES, SEASONAL_RULES, SOURCES
 
 
 def get_or_create_location(db: Session, name: str, level: LocationLevel, parent: Location | None) -> Location:
@@ -48,6 +48,10 @@ def seed(db: Session) -> dict:
                 for area in areas:
                     get_or_create_location(db, area, LocationLevel.area, r)
     added["locations"] = db.query(Location).count() - before
+
+    # Fill in centre points that are still missing (older databases were seeded without them)
+    for loc in db.scalars(select(Location).where(Location.name.in_(PLACE_COORDS.keys()), Location.lat.is_(None))):
+        loc.lat, loc.lng = PLACE_COORDS[loc.name]
 
     slug_to_id = {slug: cid for cid, slug, _, _ in CATEGORIES}
     for name, slugs, start_m, end_m, hijri, days_before, weight in SEASONAL_RULES:

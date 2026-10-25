@@ -13,6 +13,7 @@ pyjwt>=2.9           # access / refresh tokens (Phase 2)
 python-multipart>=0.0.18
 httpx>=0.28          # downloads donation photos for the classifier (Phase 5)
 pillow>=10.4         # reads photos for the classifier (Phase 5)
+apscheduler>=3.10,<4 # fetches disaster and need data on a schedule (Phase 6)
 
 # Tests
 pytest>=8.3
@@ -22,6 +23,5 @@ pytest>=8.3
 #                               pip install torch --index-url https://download.pytorch.org/whl/cpu
 # sentence-transformers       - Phase 6 RAG embeddings
 # anthropic                   - Phase 5 document review, Phase 6 RAG answers + web search
-# apscheduler                 - Phase 6 scheduled data fetching
 # pypdf                       - Phase 6 reading report PDFs
 # hijridate                   - Phase 7 Ramadan / Eid dates

@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     # Claude model for rider document review (Phase 5) and RAG answers (Phase 6)
     CLAUDE_MODEL: str = "claude-sonnet-5-5"
 
+    # Phase 6: automatic data fetching
+    ENABLE_SCHEDULER: bool = True     # set false to fetch only when an admin presses "Run now"
+    HDX_EMAIL: str = ""               # your email; HDX HAPI needs it to identify the app (free, no sign-up)
+    WEB_SCAN_EVERY_HOURS: int = 0     # Claude web scan for new disasters: 0 = only when an admin presses the button
+
     # RAG embeddings (PyTorch / sentence-transformers). 384 = size of the MiniLM models.
     EMBEDDING_MODEL: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     EMBEDDING_DIM: int = 384

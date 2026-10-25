@@ -240,33 +240,68 @@ for the rider (new job, job taken off), and for admins (rider declined). The inb
 Scoring rules and evaluation: `docs/ai-evaluation.md`. Food urgency now also adds distance to the
 nearest same-day food point and is refreshed while the food waits.
 
-## Needs, need finder, alerts, appeals [Phase 6]
+## Needs by area and disaster alerts [Phase 6A, built]
 
 | Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/needs?province_id=&city_id=` | anyone | Need level per area × category (Needs by area page, donor app) |
-| GET | `/needs/{location_id}` | anyone | Top needs with reasons and sources |
+| GET | `/needs?parent_id=` | logged in | Provinces (no `parent_id`) or the places inside one place, each with its need level per category and the reasons |
+| POST | `/admin/needs/recompute` | admin | Rebuild need levels now (also runs every hour and after each data fetch) |
+| GET | `/alerts` | logged in | Confirmed disasters of the last 30 days (donor app) |
+| GET | `/admin/alerts?status=&limit=` | admin | All alerts, newest first |
+| GET | `/admin/alerts/counts` | admin | `{unconfirmed, confirmed, handled, dismissed}` |
+| GET | `/admin/alerts/{id}` | admin | One alert with places, figures, needs, sources, camps |
+| POST | `/admin/alerts` | admin | Add an alert by hand (confirmed straight away) |
+| POST | `/admin/alerts/{id}/status` | admin | `{"status": "confirmed" \| "dismissed" \| "handled" \| "unconfirmed"}` |
+| PUT | `/admin/alerts/{id}/needs` | admin | Replace "what is needed": `[{"category_id": 2, "quantity_needed": 150}]` |
+| POST | `/admin/alerts/{id}/camp` | admin | Open a relief camp (temporary distribution point, `alert_id` set) |
+| GET | `/admin/sources` | admin | Data sources with last run and result |
+| POST | `/admin/sources/{kind}/run` | admin | Fetch now: `gdacs`, `hdx_hapi`, `web_search` (Claude news scan) |
+
+**Need levels.** Each (area, category) gets a score 0–100: the strongest signal plus 5 for each other signal
+of 25+. 80+ urgent (3), 55+ high (2), 30+ some (1).
+
+| Signal | Source | Points |
+|---|---|---|
+| IPC Phase 3+ share (food, ration) | HDX HAPI `food-security` | ≥30% 85 · ≥20% 65 · ≥10% 40 |
+| Staple price rise over ~3 months (ration; food −10) | HDX HAPI `food-prices-market-monitor` (WFP) | ≥20% 60 · ≥10% 45 |
+| Poverty headcount (ration, food, clothes, school, hygiene) | HDX HAPI `poverty-rate` | ≥40% 40 · ≥25% 25 |
+| Disaster alert, last 30 days (categories by type) | GDACS, Claude web scan, admin | severe 90 · moderate 65 · watch 40; unconfirmed ×0.7 |
+| Open requests at a distribution point | our points | 40, or 60 if 50+ items |
+
+A place shows the highest level found anywhere inside it.
+
+```json
+// GET /needs?parent_id=<sindh-id>
+{ "place": { "id": "…", "name": "Sindh", "level": "province", "parent_id": null },
+  "summary": [{ "category_id": 12, "name": "Emergency relief", "level": 3, "level_name": "urgent", "score": 90,
+                "reasons": [{ "why": "Urban flooding in Lyari", "source": "Disaster alert", "date": "21 Aug 2026",
+                              "place": "Lyari", "points": 90, "alert_id": "…" }] }],
+  "children": [{ "id": "…", "name": "Karachi", "level": "city", "lat": 24.86, "lng": 67.0,
+                 "has_children": true, "max_level": 3, "needs": [ /* same shape as summary */ ] }],
+  "computed_at": "2026-10-25T08:00:00Z" }
+
+// POST /admin/alerts/{id}/camp
+{ "name": "Lyari Relief Camp", "location_id": "…", "address": "Govt school ground", "lat": 24.867, "lng": 67.0,
+  "contact_name": "Bilal", "contact_phone": "03001112223", "open_days": 30 }
+// 201: the new distribution point (type relief_camp, same-day food, categories = the alert's needs)
+```
+
+**Where alerts come from.** GDACS every 30 minutes (Pakistan events only, placed by name or nearest city) and the
+Claude web scan (NDMA, PDMA, PMD, ReliefWeb, Dawn, Express Tribune, The News, Geo, ARY, APP; last 72 hours).
+Both create *unconfirmed* alerts with their source links; donors see an alert only after an admin confirms it.
+"What is needed" is suggested from the disaster type and the affected families (6 people per family).
+
+## Report library, RAG need finder, appeals [Phase 6B]
+
+| Method | Path | Who | What |
+|---|---|---|---|
 | POST | `/admin/need-finder/ask` | admin | RAG question, optional web search |
 | GET / POST | `/admin/reports`, `/admin/reports/upload` | admin | Report library |
 | PATCH | `/admin/reports/{id}/tags` | admin | Fix location tags |
-| GET / PATCH | `/admin/sources`, `/admin/sources/{id}` | admin | Automatic sources on/off |
-| GET | `/admin/alerts?status=` | admin | Disaster alerts |
-| POST | `/admin/alerts/{id}/confirm` · `/dismiss` · `/handled` | admin | Alert status |
-| PATCH | `/admin/alerts/{id}/needs` | admin | Edit needed quantities |
 | POST | `/admin/appeals` | admin | Send appeal to donors in chosen provinces |
 | GET | `/appeals/active` | donor | Appeals for my province |
 
 ```json
-// GET /needs?province_id=<sindh-id>
-{ "categories": [{ "id": 1, "name": "Food" }, …],
-  "areas": [{
-    "location_id": "…", "name": "Lyari", "path": "Sindh › Karachi › Karachi South",
-    "levels": [1, 2, 2, 3, 3, 1, 1, 1, 1, 1, 0, 0],        // one per category, same order
-    "top": [{ "category_id": 4, "level": 3,
-              "why": "Point asked for 50 blankets; only 10 delivered in 30 days.",
-              "sources": ["Point request", "RAAZICID deliveries", "Season"] }],
-    "updated_at": "2026-10-24T08:20:00Z" }] }
-
 // POST /admin/need-finder/ask
 { "question": "Where in Karachi are blankets needed most this winter?",
   "province_id": "…", "city_id": "…", "category_id": 4, "web_search": true }

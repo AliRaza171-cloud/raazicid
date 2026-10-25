@@ -86,3 +86,19 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2); 
 .flash { padding: 12px 16px; border-radius: 12px; font-weight: 700; }
 .flash.ok { background: var(--green-50); color: #0b5e50; }
 .flash.bad { background: var(--urgent-bg); color: var(--urgent); }
+
+/* ---------- Phase 6: needs grid ---------- */
+.lv0 { background: #f3f4f1; color: #9aa39e; }
+.lv1 { background: #fbf3d6; color: #6d5600; }
+.lv2 { background: #fbdcc0; color: #8a3f00; }
+.lv3 { background: #a2361a; color: #fff; }
+.needs-grid { border-collapse: separate; border-spacing: 3px; font-size: 13px; width: 100%; }
+.needs-grid th { font-size: 11px; font-weight: 700; color: var(--muted); padding: 4px 2px; text-align: center; white-space: nowrap; }
+.needs-grid th.place, .needs-grid td.place { text-align: left; padding: 6px 8px; min-width: 150px; }
+.needs-grid td.cell { width: 62px; height: 34px; border-radius: 7px; text-align: center; font-weight: 700; font-size: 12px; cursor: pointer; border: 2px solid transparent; }
+.needs-grid td.cell.sel { border-color: var(--ink); }
+.needs-grid td.cell.lv0 { cursor: default; }
+.crumbs { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 14px; }
+.crumbs button { border: 0; background: none; font: inherit; color: var(--green-700); font-weight: 700; cursor: pointer; padding: 0; }
+.legend { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-size: 13px; }
+.legend span.sw { display: inline-block; width: 18px; height: 14px; border-radius: 4px; vertical-align: -2px; margin-right: 4px; }

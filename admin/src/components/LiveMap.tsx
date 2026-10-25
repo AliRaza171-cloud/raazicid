@@ -1,7 +1,7 @@
 // Map for the admin (Leaflet + free CARTO tiles, loaded from a CDN so there is nothing extra to install).
 import { useEffect, useRef } from "react";
 
-export type MapMarker = { id: string; lat: number; lng: number; label: string; kind: "pickup" | "point" | "rider" | "stalled" };
+export type MapMarker = { id: string; lat: number; lng: number; label: string; kind: "pickup" | "point" | "rider" | "stalled"; color?: string; size?: number };
 export type MapLine = { id: string; points: { lat: number; lng: number }[] };
 
 const COLORS = { pickup: "#0F6B5C", point: "#2449A8", rider: "#D97706", stalled: "#A2361A" };
@@ -77,10 +77,10 @@ export default function LiveMap({
     }
     const pts: [number, number][] = [];
     for (const m of markers) {
-      const size = m.kind === "rider" || m.kind === "stalled" ? 20 : 16;
+      const size = m.size ?? (m.kind === "rider" || m.kind === "stalled" ? 20 : 16);
       const icon = L.divIcon({
         className: "",
-        html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${COLORS[m.kind]};border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>`,
+        html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${m.color ?? COLORS[m.kind]};border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>`,
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2],
       });

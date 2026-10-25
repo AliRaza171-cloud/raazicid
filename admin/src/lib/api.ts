@@ -331,3 +331,73 @@ export interface PointRequest {
 export interface PointDetail extends Point {
   requests: PointRequest[];
 }
+
+// ---------- Phase 6: needs by area, disaster alerts, data sources ----------
+
+export interface NeedReason {
+  why: string;
+  source: string;
+  date: string | null;
+  place?: string | null;
+  points: number;
+  alert_id?: string;
+}
+
+export interface AreaNeed {
+  category_id: number;
+  name: string;
+  level: 0 | 1 | 2 | 3;
+  level_name: "none" | "some" | "high" | "urgent";
+  score: number;
+  reasons: NeedReason[];
+}
+
+export interface AreaRow {
+  id: string;
+  name: string;
+  level: LocationItem["level"];
+  lat: number | null;
+  lng: number | null;
+  has_children: boolean;
+  max_level: number;
+  needs: AreaNeed[];
+}
+
+export interface AreaNeeds {
+  place: { id: string; name: string; level: string; parent_id: string | null } | null;
+  summary: AreaNeed[] | null;
+  children: AreaRow[];
+  computed_at: string | null;
+}
+
+export type AlertType = "flood" | "earthquake" | "cyclone" | "drought" | "heatwave" | "cold_wave" | "heavy_rain" | "other";
+export type AlertSeverity = "watch" | "moderate" | "severe";
+export type AlertStatus = "unconfirmed" | "confirmed" | "handled" | "dismissed";
+
+export interface Alert {
+  id: string;
+  type: AlertType;
+  severity: AlertSeverity;
+  status: AlertStatus;
+  title: string;
+  summary: string | null;
+  figures: Record<string, number>;
+  started_at: string | null;
+  created_at: string;
+  confirmed_at: string | null;
+  from_gdacs: boolean;
+  places: { id: string; name: string; path: string[]; lat: number | null; lng: number | null }[];
+  needs: { category_id: number; name: string; quantity_needed: number | null; quantity_pledged: number }[];
+  sources: { title: string; url: string | null; publisher: string | null; published_at: string | null }[];
+  camps: { id: string; name: string; is_active: boolean }[];
+}
+
+export interface DataSource {
+  kind: string;
+  name: string;
+  is_enabled: boolean;
+  every_minutes: number | null;
+  last_run_at: string | null;
+  last_status: string | null;
+  can_run: boolean;
+}

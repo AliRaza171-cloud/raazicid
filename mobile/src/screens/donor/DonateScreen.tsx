@@ -1,4 +1,4 @@
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { api, type Category } from "../../api";
@@ -18,6 +18,7 @@ const AUTO_GAP = 0.25;   // …and clearly ahead of the second choice (clothes v
 /** Step 1 of 2: photos and category. Photos upload as soon as they are picked. */
 export default function DonateScreen() {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
   const [cats, setCats] = useState<Category[]>([]);
   const [categoryId, setCategoryId] = useState<number | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -56,6 +57,16 @@ export default function DonateScreen() {
   useEffect(() => {
     api<Category[]>("/categories").then(setCats).catch((e) => setError(e.message));
   }, []);
+
+  // Opened from "Needs by area" or an alert with a category already chosen (Phase 6)
+  const preset: number | undefined = route.params?.categoryId;
+  const presetFor: string | undefined = route.params?.forText;
+  useEffect(() => {
+    if (preset) {
+      setCategoryId(preset);
+      setTouched(true);
+    }
+  }, [preset]);
 
   const addPhoto = () => {
     Alert.alert("Add photo", "Show the items clearly, in good light.", [
@@ -106,6 +117,12 @@ export default function DonateScreen() {
 
   return (
     <Screen title="New donation" sub="Step 1 of 2 · Photos and category">
+      {presetFor ? (
+        <View style={{ backgroundColor: colors.primarySoft, borderRadius: 12, padding: 12 }}>
+          <Text style={{ color: colors.primaryDark, fontWeight: "700" }}>Needed: {presetFor}</Text>
+          <Text style={{ color: colors.ink2, fontSize: 12 }}>We send it to the distribution point that needs it most.</Text>
+        </View>
+      ) : null}
       <Text style={st.h}>Photos</Text>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
         {photos.map((p) => (

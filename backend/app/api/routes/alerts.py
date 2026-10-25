@@ -1,0 +1,262 @@
+"""Disaster alerts (Phase 6): list, confirm / dismiss, what is needed, open a relief camp; data sources status."""
+
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Literal, Optional
+
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.core.deps import get_current_user, require_roles
+from app.core.errors import api_error
+from app.db.session import get_db
+from app.models import AlertNeed, Category, DisasterAlert, DistributionPoint, Location, Source, User
+from app.models.enums import AlertSeverity, AlertStatus, AlertType, PointType, Role, SourceKind
+from app.schemas.points import PointDetail
+from app.services.donations import point_out
+from app.services.geo import in_pakistan
+from app.services.locations import location_path
+from app.services.needs import recompute, suggest_alert_needs
+from app.services.sources.runner import run_source
+
+router = APIRouter(tags=["alerts"])
+admin_only = require_roles(Role.admin)
+ACTIVE_DAYS = 30
+
+
+# ---------- shapes ----------
+
+class AlertPlace(BaseModel):
+    id: uuid.UUID
+    name: str
+    path: list[str]
+    lat: Optional[float]
+    lng: Optional[float]
+
+
+class AlertNeedOut(BaseModel):
+    category_id: int
+    name: str
+    quantity_needed: Optional[int]
+    quantity_pledged: int
+
+
+class AlertSource(BaseModel):
+    title: str
+    url: Optional[str]
+    publisher: Optional[str]
+    published_at: Optional[datetime]
+
+
+class AlertOut(BaseModel):
+    id: uuid.UUID
+    type: AlertType
+    severity: AlertSeverity
+    status: AlertStatus
+    title: str
+    summary: Optional[str]
+    figures: dict
+    started_at: Optional[datetime]
+    created_at: datetime
+    confirmed_at: Optional[datetime]
+    from_gdacs: bool
+    places: list[AlertPlace]
+    needs: list[AlertNeedOut]
+    sources: list[AlertSource]
+    camps: list[dict]
+
+
+class AlertIn(BaseModel):
+    type: AlertType
+    severity: AlertSeverity
+    title: str = Field(min_length=3, max_length=200)
+    summary: Optional[str] = Field(default=None, max_length=2000)
+    location_ids: list[uuid.UUID] = Field(min_length=1)
+    figures: dict[str, int] = Field(default_factory=dict)
+
+
+class StatusIn(BaseModel):
+    status: Literal["confirmed", "dismissed", "handled", "unconfirmed"]
+
+
+class NeedIn(BaseModel):
+    category_id: int
+    quantity_needed: Optional[int] = Field(default=None, ge=0, le=10_000_000)
+
+
+class CampIn(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    location_id: uuid.UUID
+    address: str = Field(min_length=3, max_length=500)
+    lat: float
+    lng: float
+    contact_name: Optional[str] = Field(default=None, max_length=120)
+    contact_phone: Optional[str] = None
+    open_days: int = Field(default=30, ge=1, le=365)
+
+
+# ---------- helpers ----------
+
+def alert_out(db: Session, a: DisasterAlert) -> AlertOut:
+    cats = {c.id: c.name for c in db.scalars(select(Category))}
+    camps = db.scalars(select(DistributionPoint).where(DistributionPoint.alert_id == a.id))
+    return AlertOut(
+        id=a.id, type=a.type, severity=a.severity, status=a.status, title=a.title, summary=a.summary,
+        figures=a.reported_figures or {}, started_at=a.started_at, created_at=a.created_at, confirmed_at=a.confirmed_at,
+        from_gdacs=bool(a.gdacs_event_id),
+        places=[AlertPlace(id=l.id, name=l.name, path=location_path(db, l.id), lat=l.lat, lng=l.lng) for l in a.locations],
+        needs=[AlertNeedOut(category_id=n.category_id, name=cats.get(n.category_id, "?"), quantity_needed=n.quantity_needed,
+                            quantity_pledged=n.quantity_pledged) for n in sorted(a.needs, key=lambda n: n.category_id)],
+        sources=[AlertSource(title=r.title, url=r.url, publisher=r.publisher, published_at=r.published_at) for r in a.reports],
+        camps=[{"id": str(p.id), "name": p.name, "is_active": p.is_active} for p in camps],
+    )
+
+
+def _get(db: Session, alert_id: uuid.UUID) -> DisasterAlert:
+    a = db.get(DisasterAlert, alert_id)
+    if a is None:
+        raise api_error(404, "alert_not_found", "Alert not found")
+    return a
+
+
+# ---------- everyone logged in ----------
+
+@router.get("/alerts", response_model=list[AlertOut])
+def active_alerts(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Confirmed disasters of the last 30 days, newest first (donor app)."""
+    since = datetime.now(timezone.utc) - timedelta(days=ACTIVE_DAYS)
+    rows = db.scalars(select(DisasterAlert).where(DisasterAlert.status == AlertStatus.confirmed, DisasterAlert.created_at >= since)
+                      .order_by(DisasterAlert.created_at.desc()))
+    return [alert_out(db, a) for a in rows]
+
+
+# ---------- admin ----------
+
+@router.get("/admin/alerts", response_model=list[AlertOut])
+def all_alerts(status: Optional[AlertStatus] = None, limit: int = Query(50, ge=1, le=200),
+               _: User = Depends(admin_only), db: Session = Depends(get_db)):
+    stmt = select(DisasterAlert).order_by(DisasterAlert.created_at.desc()).limit(limit)
+    if status:
+        stmt = stmt.where(DisasterAlert.status == status)
+    return [alert_out(db, a) for a in db.scalars(stmt)]
+
+
+@router.get("/admin/alerts/counts")
+def counts(_: User = Depends(admin_only), db: Session = Depends(get_db)):
+    rows = dict(db.execute(select(DisasterAlert.status, func.count()).group_by(DisasterAlert.status)).all())
+    return {s.value: rows.get(s, 0) for s in AlertStatus}
+
+
+@router.get("/admin/alerts/{alert_id}", response_model=AlertOut)
+def one(alert_id: uuid.UUID, _: User = Depends(admin_only), db: Session = Depends(get_db)):
+    return alert_out(db, _get(db, alert_id))
+
+
+@router.post("/admin/alerts", response_model=AlertOut, status_code=201)
+def create(body: AlertIn, admin: User = Depends(admin_only), db: Session = Depends(get_db)):
+    """An alert the admin heard about directly (phone call, field team). Confirmed straight away."""
+    locs = [db.get(Location, i) for i in body.location_ids]
+    if any(l is None for l in locs):
+        raise api_error(422, "bad_location", "Choose the places from the list")
+    a = DisasterAlert(type=body.type, severity=body.severity, status=AlertStatus.confirmed, title=" ".join(body.title.split()),
+                      summary=body.summary, reported_figures={k: v for k, v in body.figures.items() if v and v > 0},
+                      started_at=datetime.now(timezone.utc), confirmed_by=admin.id, confirmed_at=datetime.now(timezone.utc))
+    a.locations = locs
+    db.add(a)
+    db.flush()
+    suggest_alert_needs(db, a)
+    db.commit()
+    recompute(db)
+    return alert_out(db, a)
+
+
+@router.post("/admin/alerts/{alert_id}/status", response_model=AlertOut)
+def set_status(alert_id: uuid.UUID, body: StatusIn, admin: User = Depends(admin_only), db: Session = Depends(get_db)):
+    a = _get(db, alert_id)
+    a.status = AlertStatus(body.status)
+    if a.status == AlertStatus.confirmed:
+        a.confirmed_by, a.confirmed_at = admin.id, datetime.now(timezone.utc)
+        if not a.needs:
+            suggest_alert_needs(db, a)
+    db.commit()
+    recompute(db)   # confirmed alerts count fully in "needs by area"; dismissed / handled ones drop out
+    return alert_out(db, a)
+
+
+@router.put("/admin/alerts/{alert_id}/needs", response_model=AlertOut)
+def set_needs(alert_id: uuid.UUID, body: list[NeedIn], _: User = Depends(admin_only), db: Session = Depends(get_db)):
+    """Replace the 'what is needed' table. Categories left out are removed."""
+    a = _get(db, alert_id)
+    valid = {c.id for c in db.scalars(select(Category))}
+    if any(n.category_id not in valid for n in body):
+        raise api_error(422, "bad_category", "Unknown category")
+    keep = {n.category_id: n for n in body}
+    for n in list(a.needs):
+        if n.category_id not in keep:
+            a.needs.remove(n)
+    have = {n.category_id: n for n in a.needs}
+    for cid, n in keep.items():
+        if cid in have:
+            have[cid].quantity_needed = n.quantity_needed
+        else:
+            a.needs.append(AlertNeed(category_id=cid, quantity_needed=n.quantity_needed))
+    db.commit()
+    return alert_out(db, a)
+
+
+@router.post("/admin/alerts/{alert_id}/camp", response_model=PointDetail, status_code=201)
+def open_camp(alert_id: uuid.UUID, body: CampIn, _: User = Depends(admin_only), db: Session = Depends(get_db)):
+    """Open a temporary relief camp for this disaster: a distribution point that takes what the alert needs."""
+    a = _get(db, alert_id)
+    if a.status not in (AlertStatus.confirmed, AlertStatus.unconfirmed):
+        raise api_error(409, "alert_closed", "This alert is closed")
+    if db.get(Location, body.location_id) is None:
+        raise api_error(422, "bad_location", "Choose the area from the list")
+    if not in_pakistan(body.lat, body.lng):
+        raise api_error(422, "bad_coordinates", "Coordinates must be in Pakistan (latitude first)")
+    cats = [db.get(Category, n.category_id) for n in a.needs]
+    p = DistributionPoint(name=" ".join(body.name.split()), type=PointType.relief_camp, location_id=body.location_id,
+                          address=body.address, lat=body.lat, lng=body.lng, contact_name=body.contact_name,
+                          contact_phone=body.contact_phone, same_day_food=True, is_active=True, alert_id=a.id,
+                          closes_at=datetime.now(timezone.utc) + timedelta(days=body.open_days))
+    p.categories = [c for c in cats if c]
+    db.add(p)
+    if a.status == AlertStatus.unconfirmed:
+        a.status = AlertStatus.confirmed
+        a.confirmed_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(p)
+    return PointDetail(**point_out(db, p).model_dump(), requests=[])
+
+
+# ---------- data sources ----------
+
+class SourceOut(BaseModel):
+    kind: SourceKind
+    name: str
+    is_enabled: bool
+    every_minutes: Optional[int]
+    last_run_at: Optional[datetime]
+    last_status: Optional[str]
+    can_run: bool
+
+
+RUNNABLE = {SourceKind.gdacs, SourceKind.hdx_hapi, SourceKind.web_search}
+
+
+@router.get("/admin/sources", response_model=list[SourceOut])
+def sources(_: User = Depends(admin_only), db: Session = Depends(get_db)):
+    return [SourceOut(kind=s.kind, name=s.name, is_enabled=s.is_enabled, every_minutes=s.every_minutes, last_run_at=s.last_run_at,
+                      last_status=s.last_status, can_run=s.kind in RUNNABLE)
+            for s in db.scalars(select(Source).order_by(Source.id))]
+
+
+@router.post("/admin/sources/{kind}/run")
+def run(kind: SourceKind, _: User = Depends(admin_only), db: Session = Depends(get_db)):
+    """Fetch now. The web scan asks Claude to search the news (takes up to a minute, costs a few cents)."""
+    if kind not in RUNNABLE:
+        raise api_error(422, "not_runnable", "This source is not automatic yet")
+    ok, status = run_source(db, kind)
+    return {"ok": ok, "status": status}
