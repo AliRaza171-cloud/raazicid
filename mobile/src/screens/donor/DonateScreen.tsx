@@ -12,7 +12,8 @@ type Photo = { key: string; uri: string; url: string | null; failed: boolean };
 type Suggestion = { category_id: number; name: string; p: number; shared?: boolean };
 type Ai = { state: "idle" | "thinking" | "done" | "off"; suggestions: Suggestion[] };
 
-const AUTO_PICK = 0.6;   // pre-select the AI's first choice when it is at least this sure
+const AUTO_PICK = 0.6;   // pre-select the AI's first choice only when it is at least this sure…
+const AUTO_GAP = 0.25;   // …and clearly ahead of the second choice (clothes vs winter wear look alike)
 
 /** Step 1 of 2: photos and category. Photos upload as soon as they are picked. */
 export default function DonateScreen() {
@@ -41,8 +42,9 @@ export default function DonateScreen() {
         if (!alive) return;
         setAi({ state: "done", suggestions: r.suggestions });
         // A grouped answer (e.g. blankets + winter support) could be either one: let the donor choose
-        const first = r.suggestions[0];
-        if (!touched.current && first && first.p >= AUTO_PICK && !first.shared) setCategoryId(first.category_id);
+        const [first, second] = r.suggestions;
+        const clear = first && first.p >= AUTO_PICK && !first.shared && (!second || first.p - second.p >= AUTO_GAP);
+        if (!touched.current && clear) setCategoryId(first.category_id);
       })
       .catch(() => alive && setAi({ state: "off", suggestions: [] }));
     return () => {
