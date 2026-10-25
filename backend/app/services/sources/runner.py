@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.models import DisasterAlert, Source
 from app.models.enums import AlertStatus, SourceKind
 from app.services import needs
-from app.services.sources import gdacs, hdx, webscan
+from app.services.sources import gdacs, hdx, reliefweb, webscan
 
 log = logging.getLogger("raazicid.sources")
 
@@ -27,7 +27,8 @@ def _webscan(db: Session, source_id: int) -> str:
     return webscan.sync(db, events, source_id)
 
 
-RUNNERS = {SourceKind.gdacs: _gdacs, SourceKind.hdx_hapi: _hdx, SourceKind.web_search: _webscan}
+RUNNERS = {SourceKind.gdacs: _gdacs, SourceKind.hdx_hapi: _hdx, SourceKind.web_search: _webscan,
+           SourceKind.reliefweb: reliefweb.fetch_and_sync}
 
 
 def fill_alert_needs(db: Session) -> None:

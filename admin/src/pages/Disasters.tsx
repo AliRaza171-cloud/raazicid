@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import AppealForm from "../components/AppealForm";
 import { PageHeader } from "../components/Layout";
 import LocationSelect from "../components/LocationSelect";
-import { api, type Alert, type AlertStatus, type Category, type DataSource } from "../lib/api";
+import { api, type Alert, type AlertStatus, type Appeal, type Category, type DataSource } from "../lib/api";
 import { ALERT_STATUS, ALERT_TYPES, FIGURES, SEVERITY, ago, date, dateTime } from "../lib/format";
 
 const TABS: { key: AlertStatus | "all"; label: string }[] = [
@@ -205,6 +206,8 @@ function AlertPanel({ id, cats, onClose, onChanged }: { id: string; cats: Catego
 
       <NeedsTable alert={a} cats={cats} editable={open} onSaved={(x) => { setA(x); onChanged("Saved what is needed"); }} />
 
+      {a.status === "confirmed" && <Appeals alert={a} cats={cats} onSent={onChanged} />}
+
       <section style={{ borderTop: "1px solid var(--line)", paddingTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
         <h3 style={{ margin: 0, fontSize: 15 }}>Relief camps</h3>
         {a.camps.length > 0 ? (
@@ -228,6 +231,48 @@ function AlertPanel({ id, cats, onClose, onChanged }: { id: string; cats: Catego
         )}
       </section>
     </aside>
+  );
+}
+
+function Appeals({ alert, cats, onSent }: { alert: Alert; cats: Category[]; onSent: (msg: string) => void }) {
+  const [list, setList] = useState<Appeal[]>([]);
+  const [writing, setWriting] = useState(false);
+  const load = useCallback(() => {
+    api<Appeal[]>(`/admin/appeals?alert_id=${alert.id}`).then(setList).catch(() => undefined);
+  }, [alert.id]);
+  useEffect(load, [load]);
+
+  const end = async (id: string) => {
+    await api(`/admin/appeals/${id}/end`, { method: "POST" }).catch(() => undefined);
+    load();
+  };
+
+  const first = alert.places[0];
+  return (
+    <section style={{ borderTop: "1px solid var(--line)", paddingTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div>
+        <h3 style={{ margin: 0, fontSize: 15 }}>Appeals to donors</h3>
+        <p className="muted small" style={{ margin: "2px 0 0" }}>Donors in the chosen provinces get a notification in the app with the items needed.</p>
+      </div>
+      {list.map((ap) => (
+        <div key={ap.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ marginRight: "auto" }}>
+            <strong>{ap.title}</strong>
+            <div className="muted small">{ap.reached} donors in {ap.provinces.join(", ")}{ap.sent_at ? ` · ${dateTime(ap.sent_at)}` : ""}</div>
+          </span>
+          <span className={`chip ${ap.live ? "ok" : "wait"}`}>{ap.live ? "Live" : "Ended"}</span>
+          {ap.live && <button className="btn ghost small" onClick={() => end(ap.id)}>End</button>}
+        </div>
+      ))}
+      {!writing && <button className="btn ghost" onClick={() => setWriting(true)} disabled={!first}>Send an appeal</button>}
+      {writing && first && (
+        <AppealForm cats={cats}
+          defaults={{ title: `Help for ${alert.title}`.slice(0, 160), message: alert.summary ?? `${ALERT_TYPES[alert.type]} in ${first.name}. Families need help now.`,
+                      locationId: first.id, locationPath: first.path, categoryIds: alert.needs.map((n) => n.category_id), alertId: alert.id }}
+          onCancel={() => setWriting(false)}
+          onSent={(ap) => { setWriting(false); load(); onSent(`Appeal sent to ${ap.reached} donors in ${ap.provinces.join(", ")}`); }} />
+      )}
+    </section>
   );
 }
 
@@ -487,7 +532,7 @@ function Sources({ onRan }: { onRan: (msg: string) => void }) {
         <tbody>
           {shown.map((s) => (
             <tr key={s.kind}>
-              <td><strong>{s.name}</strong><div className="muted small">{s.kind === "web_search" ? "When you run it" : s.can_run ? "Automatic" : "Waiting for ReliefWeb approval (Phase 6B)"}</div></td>
+              <td><strong>{s.name}</strong><div className="muted small">{s.kind === "web_search" ? "When you run it" : s.can_run ? "Automatic" : "Add RELIEFWEB_APPNAME to backend/.env once ReliefWeb approves it"}</div></td>
               <td>{ago(s.last_run_at)}</td>
               <td style={{ maxWidth: 380 }}>
                 {s.last_status ? <span style={{ color: s.last_status.startsWith("Error") ? "var(--urgent)" : undefined }}>{s.last_status}</span> : <span className="muted">–</span>}

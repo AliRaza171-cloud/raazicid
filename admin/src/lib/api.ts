@@ -75,7 +75,8 @@ async function readError(res: Response): Promise<ApiError> {
 async function rawFetch(path: string, init: RequestInit, token: string | null): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
-  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  // FormData (file uploads) sets its own multipart Content-Type
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
   try {
     return await fetch(`${API_URL}${path}`, { ...init, headers });
@@ -400,4 +401,103 @@ export interface DataSource {
   last_run_at: string | null;
   last_status: string | null;
   can_run: boolean;
+}
+
+// ---------- Phase 6B: report library, need finder, appeals ----------
+
+export type ReportStatus = "new" | "tagged" | "needs_review" | "archived";
+
+export interface ReportItem {
+  id: string;
+  title: string;
+  publisher: string | null;
+  url: string | null;
+  source: string;
+  source_kind: string;
+  status: ReportStatus;
+  published_at: string | null;
+  created_at: string;
+  chunks: number;
+  places: string[];
+  has_text: boolean;
+}
+
+export interface ChunkTag { id: string; name: string; path: string[]; confidence: number; confirmed: boolean }
+
+export interface ReportChunk {
+  id: string;
+  index: number;
+  page: number | null;
+  text: string;
+  has_embedding: boolean;
+  places: ChunkTag[];
+}
+
+export interface ReportDetail extends ReportItem {
+  chunk_list: ReportChunk[];
+}
+
+export interface RagStatus {
+  embeddings: { available: boolean; model: string; note: string };
+  claude: boolean;
+  reliefweb: boolean;
+  reports: number;
+  chunks: number;
+  chunks_with_vectors: number;
+  search: string;
+}
+
+export interface FinderSource {
+  id: string;
+  report_id: string;
+  title: string;
+  publisher: string | null;
+  url: string | null;
+  page: number | null;
+  date: string | null;
+  text: string;
+  places: string[];
+  found_by: string[];
+  cited?: boolean;
+}
+
+export interface FinderArea {
+  name: string;
+  need: "urgent" | "high" | "some";
+  categories: string[];
+  reason: string;
+  sources: string[];
+  location_id: string | null;
+  path: string[];
+  our_level: number | null;
+}
+
+export interface FinderAnswer {
+  question: string;
+  place: string | null;
+  category: string | null;
+  answer: string;
+  areas: FinderArea[];
+  confidence: "low" | "medium" | "high";
+  sources: FinderSource[];
+  facts: { id: string; location_id: string; place: string; category: string; level: string; score: number; why: string }[];
+  web_results: { url: string; title: string; snippet: string }[];
+  used_web: boolean;
+  ai: boolean;
+  model: string;
+}
+
+export interface Appeal {
+  id: string;
+  title: string;
+  message: string;
+  place: string[];
+  location_id: string;
+  categories: { id: number; name: string }[];
+  provinces: string[];
+  alert_id: string | null;
+  sent_at: string | null;
+  ends_at: string | null;
+  live: boolean;
+  reached: number;
 }

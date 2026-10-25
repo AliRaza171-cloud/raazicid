@@ -291,25 +291,60 @@ Claude web scan (NDMA, PDMA, PMD, ReliefWeb, Dawn, Express Tribune, The News, Ge
 Both create *unconfirmed* alerts with their source links; donors see an alert only after an admin confirms it.
 "What is needed" is suggested from the disaster type and the affected families (6 people per family).
 
-## Report library, RAG need finder, appeals [Phase 6B]
+## Report library, RAG need finder, appeals [Phase 6B, built]
 
 | Method | Path | Who | What |
 |---|---|---|---|
-| POST | `/admin/need-finder/ask` | admin | RAG question, optional web search |
-| GET / POST | `/admin/reports`, `/admin/reports/upload` | admin | Report library |
-| PATCH | `/admin/reports/{id}/tags` | admin | Fix location tags |
-| POST | `/admin/appeals` | admin | Send appeal to donors in chosen provinces |
-| GET | `/appeals/active` | donor | Appeals for my province |
+| GET | `/admin/rag/status` | admin | Embeddings on/off, Claude ready, ReliefWeb set up, counts, search mode |
+| GET | `/admin/reports?status=&q=&limit=` | admin | Report library (archived hidden unless asked for) |
+| GET | `/admin/reports/{id}` | admin | Report with its passages and place tags |
+| POST | `/admin/reports/upload` | admin | Multipart: `file` (PDF or .txt, ≤15 MB), optional `title`, `publisher`, `published_at` |
+| POST | `/admin/reports/link` | admin | `{"url": "https://…"}`: read a web page or online PDF |
+| POST | `/admin/reports/{id}/fetch` | admin | Read the text of a link saved by the news scan or GDACS |
+| POST | `/admin/reports/{id}/archive` · `/restore` | admin | Stop / start using a report |
+| PUT | `/admin/chunks/{id}/places` | admin | `{"location_ids": […]}`: correct a passage's places |
+| POST | `/admin/rag/embed-missing` | admin | Add vectors to passages stored before embeddings were installed |
+| POST | `/admin/need-finder/ask` | admin | RAG question (below) |
+| POST | `/admin/appeals` | admin | Send an appeal to donors in chosen provinces |
+| GET | `/admin/appeals?alert_id=` | admin | Appeals with how many donors they reached |
+| POST | `/admin/appeals/{id}/end` | admin | Stop showing an appeal |
+| GET | `/appeals/active` | logged in | Live appeals for my province (or all Pakistan) |
+| GET | `/me/notifications?limit=` | logged in | `{unread, items[]}`: donation updates, appeals, rider messages |
+| POST | `/me/notifications/read` | logged in | Mark all as read |
+| POST | `/admin/sources/reliefweb/run` | admin | Fetch ReliefWeb Pakistan reports (needs `RELIEFWEB_APPNAME`) |
+
+**How the need finder works (retrieval-augmented generation).**
+1. *Ingest:* each report is split into ~350-word passages (60-word overlap) that keep their page number.
+   Each passage is tagged with the Pakistani places it names (gazetteer), and gets a 384-number vector from
+   `paraphrase-multilingual-MiniLM-L12-v2` (sentence-transformers) stored in pgvector.
+2. *Retrieve:* hybrid search. Vector search (cosine distance) finds passages with the same meaning, Postgres
+   full-text search finds the same words, and reciprocal rank fusion merges the two lists. A place filter keeps
+   passages about that place, places inside it, or the province / city around it.
+3. *Augment:* the top 8 passages ([S1]…) and our computed need levels for the place ([D1]…) go into the prompt.
+4. *Generate:* Claude answers only from those sources (plus web search if switched on), cites every claim and
+   names areas. Areas are matched to our places so the admin can open them or send an appeal.
+
+Without embeddings installed, search is keyword only; without a Claude key, the need finder returns the passages
+and need levels without a written answer.
 
 ```json
 // POST /admin/need-finder/ask
-{ "question": "Where in Karachi are blankets needed most this winter?",
-  "province_id": "…", "city_id": "…", "category_id": 4, "web_search": true }
+{ "question": "Where in Karachi are blankets needed most this winter?", "location_id": "<karachi>", "category_id": 4,
+  "web_search": false }
 // 200
-{ "answer": "Three areas stand out…",
-  "areas": [{ "location_id": "…", "name": "Lyari", "need": 5, "categories": ["Blankets", "Warm clothes"],
-              "reason": "…", "sources": [{ "title": "karachi-winter-needs.pdf", "page": 4, "report_id": "…" }] }],
-  "web_results": [{ "title": "…", "url": "https://dawn.com/…", "snippet": "…" }] }
+{ "answer": "Lyari stands out: families sleep without blankets as nights get colder [S1]. …",
+  "confidence": "medium", "ai": true, "used_web": false,
+  "areas": [{ "name": "Lyari", "need": "urgent", "categories": ["Blankets"], "reason": "… [S1]", "sources": ["S1"],
+              "location_id": "…", "path": ["Sindh", "Karachi", "Karachi South", "Lyari"], "our_level": 2 }],
+  "sources": [{ "id": "S1", "title": "Winter needs assessment", "publisher": "RAAZICID field team", "page": 2,
+                "date": "2026-10-20T00:00:00", "places": ["Lyari"], "found_by": ["meaning", "words"], "cited": true, "text": "…" }],
+  "facts": [{ "id": "D1", "place": "Sindh › Karachi › Karachi South › Lyari", "category": "Blankets", "level": "high", "score": 65, "why": "…" }],
+  "web_results": [] }
+
+// POST /admin/appeals
+{ "title": "Blankets for Lyari", "message": "Nights are cold and many families have no blankets.",
+  "location_id": "<lyari>", "category_ids": [4, 5], "province_ids": [], "all_pakistan": false, "alert_id": null, "days": 14 }
+// 201: the appeal with "provinces": ["Sindh"] and "reached": <donors notified>
 ```
 
 ## Seasonal, flags, analytics, ratings [Phases 7–8]

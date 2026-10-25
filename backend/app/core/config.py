@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     # RAG embeddings (PyTorch / sentence-transformers). 384 = size of the MiniLM models.
     EMBEDDING_MODEL: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     EMBEDDING_DIM: int = 384
+    ENABLE_EMBEDDINGS: bool = True    # false = keyword search only (no model download)
+    MAX_UPLOAD_MB: int = 15           # report library uploads
 
     @property
     def cors_origins(self) -> list[str]:

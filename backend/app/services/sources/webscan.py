@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.models import DisasterAlert, Location, Report
 from app.models.enums import AlertSeverity, AlertStatus, AlertType, SourceKind
-from app.services.claude import ask, extract_json, text_and_citations
+from app.services.claude import ask_complete, extract_json, text_and_citations
 from app.services.gazetteer import find_places, load_places
 
 DOMAINS = ["ndma.gov.pk", "pmd.gov.pk", "reliefweb.int", "gdacs.org", "dawn.com", "tribune.com.pk",
@@ -42,7 +42,7 @@ If nothing qualifies, reply {{"events": []}}."""
 
 def scan() -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     today = datetime.now(timezone.utc).strftime("%d %B %Y")
-    res = ask(
+    res = ask_complete(
         [{"role": "user", "content": PROMPT.format(today=today)}],
         # No user_location: the web search tool does not accept Pakistan (PK) as a country.
         # The prompt and the Pakistani domain list keep the search on Pakistan.

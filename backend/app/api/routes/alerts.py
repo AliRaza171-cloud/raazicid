@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.deps import get_current_user, require_roles
 from app.core.errors import api_error
 from app.db.session import get_db
@@ -243,20 +244,24 @@ class SourceOut(BaseModel):
     can_run: bool
 
 
-RUNNABLE = {SourceKind.gdacs, SourceKind.hdx_hapi, SourceKind.web_search}
+RUNNABLE = {SourceKind.gdacs, SourceKind.hdx_hapi, SourceKind.web_search, SourceKind.reliefweb}
+
+
+def can_run(kind: SourceKind) -> bool:
+    return kind in RUNNABLE and (kind != SourceKind.reliefweb or bool(settings.RELIEFWEB_APPNAME))
 
 
 @router.get("/admin/sources", response_model=list[SourceOut])
 def sources(_: User = Depends(admin_only), db: Session = Depends(get_db)):
     return [SourceOut(kind=s.kind, name=s.name, is_enabled=s.is_enabled, every_minutes=s.every_minutes, last_run_at=s.last_run_at,
-                      last_status=s.last_status, can_run=s.kind in RUNNABLE)
+                      last_status=s.last_status, can_run=can_run(s.kind))
             for s in db.scalars(select(Source).order_by(Source.id))]
 
 
 @router.post("/admin/sources/{kind}/run")
 def run(kind: SourceKind, _: User = Depends(admin_only), db: Session = Depends(get_db)):
     """Fetch now. The web scan asks Claude to search the news (takes up to a minute, costs a few cents)."""
-    if kind not in RUNNABLE:
-        raise api_error(422, "not_runnable", "This source is not automatic yet")
+    if not can_run(kind):
+        raise api_error(422, "not_runnable", "This source is not set up yet" if kind == SourceKind.reliefweb else "This source is not automatic yet")
     ok, status = run_source(db, kind)
     return {"ok": ok, "status": status}

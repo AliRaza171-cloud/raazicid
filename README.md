@@ -133,6 +133,17 @@ While the backend runs it fetches GDACS every 30 minutes and HDX (IPC, food pric
 then recomputes need levels. Admin web: **Disaster alerts** (check, confirm, open a relief camp, data sources)
 and **Needs by area**. Donor app: **Alerts** tab, the Home banner and "What is needed where".
 
+### 7. Report library and need finder (Phase 6B)
+
+```powershell
+pip install -r requirements.txt          # adds pypdf (reads report PDFs)
+pip install sentence-transformers        # optional: vector search (needs torch; downloads a ~470 MB model once)
+```
+Without `sentence-transformers` the need finder uses keyword search; everything else works. If you install it
+after adding reports, press **Add vectors to … passages** on the Report library page.
+Once ReliefWeb approves your appname, add `RELIEFWEB_APPNAME=...` to `backend/.env`: its Pakistan reports then
+arrive every 6 hours.
+
 ---
 
 ## Working together
@@ -151,7 +162,7 @@ and **Needs by area**. Donor app: **Alerts** tab, the Home banner and "What is n
 - [x] Phase 4 — pickup, delivery, tracking (assign rider, proofs with GPS checks, hand-out, live map)
 - [x] Phase 5 — AI: photo classifier (PyTorch), rider score, urgency v2, Claude document check
 - [x] Phase 6A — needs by area, disaster alerts (GDACS, HDX, Claude web scan), relief camps
-- [ ] Phase 6B — report library, RAG need finder, appeals, ReliefWeb
+- [x] Phase 6B — report library, RAG need finder (hybrid search + Claude with citations), appeals, notifications
 - [ ] Phase 7 — seasonal suggestions
 - [ ] Phase 8 — analytics, fraud flags, ratings
 - [ ] Phase 9 — testing, evaluation, deployment

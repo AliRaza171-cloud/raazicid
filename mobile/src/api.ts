@@ -317,3 +317,26 @@ export interface DisasterAlert {
   sources: { title: string; url: string | null; publisher: string | null }[];
   camps: { id: string; name: string; is_active: boolean }[];
 }
+
+// ---------- Phase 6B: appeals and notifications ----------
+
+export interface Appeal {
+  id: string;
+  title: string;
+  message: string;
+  place: string[];
+  categories: { id: number; name: string }[];
+  provinces: string[];
+  sent_at: string | null;
+  ends_at: string | null;
+}
+
+export interface AppNotification {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  data: Record<string, any>;
+  created_at: string;
+  read: boolean;
+}

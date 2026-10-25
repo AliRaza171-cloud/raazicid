@@ -61,3 +61,15 @@ def extract_json(text: str) -> Any:
     if not raw:
         raise ValueError("no JSON in the answer")
     return json.loads(raw)
+
+
+def ask_complete(messages: list[dict[str, Any]], **kw) -> dict[str, Any]:
+    """Like ask(), but continues when a long web search pauses the turn ("pause_turn"), up to 3 times."""
+    res = ask(messages, **kw)
+    content = list(res.get("content", []))
+    for _ in range(3):
+        if res.get("stop_reason") != "pause_turn":
+            break
+        res = ask(messages + [{"role": "assistant", "content": content}], **kw)
+        content += res.get("content", [])
+    return {**res, "content": content}
