@@ -1,4 +1,5 @@
-// Map for the admin (Leaflet + free CARTO tiles, loaded from a CDN so there is nothing extra to install).
+// Map for the admin (Leaflet + free OpenStreetMap tiles, loaded from a CDN so there is nothing extra to install).
+// No API key: OpenStreetMap tiles first; if they fail, Esri's free street map instead.
 import { useEffect, useRef } from "react";
 
 export type MapMarker = { id: string; lat: number; lng: number; label: string; kind: "pickup" | "point" | "rider" | "stalled"; color?: string; size?: number };
@@ -29,6 +30,25 @@ function loadLeaflet(): Promise<Leaflet> {
   return loading;
 }
 
+/** OpenStreetMap tiles (no key). If several tiles fail to load, switch to Esri's free street map. */
+function addBaseTiles(L: Leaflet, m: Leaflet) {
+  const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors",
+  });
+  let errors = 0;
+  osm.on("tileerror", () => {
+    errors += 1;
+    if (errors !== 3) return;
+    m.removeLayer(osm);
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", {
+      maxZoom: 19,
+      attribution: "Tiles &copy; Esri",
+    }).addTo(m);
+  });
+  osm.addTo(m);
+}
+
 export default function LiveMap({
   markers,
   lines = [],
@@ -52,10 +72,7 @@ export default function LiveMap({
     loadLeaflet().then((L) => {
       if (cancelled || !box.current || map.current) return;
       map.current = L.map(box.current, { zoomControl: true }).setView([30.3753, 69.3451], 5);   // Pakistan
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-        maxZoom: 19,
-        attribution: "&copy; OpenStreetMap &copy; CARTO",
-      }).addTo(map.current);
+      addBaseTiles(L, map.current);
       layer.current = L.layerGroup().addTo(map.current);
       draw();
     });

@@ -1,4 +1,4 @@
-// A small map inside a WebView (Leaflet + free CARTO tiles), so no Google Maps key is needed in Expo Go.
+// A small map inside a WebView (Leaflet + free OpenStreetMap tiles, Esri if those fail), so no Google Maps key is needed in Expo Go.
 import { useEffect, useRef } from "react";
 import { View } from "react-native";
 import { WebView } from "react-native-webview";
@@ -14,8 +14,15 @@ const HTML = `<!doctype html><html><head>
 <style>html,body,#m{height:100%;margin:0}.pin{border-radius:50%;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)}</style>
 </head><body><div id="m"></div><script>
 var map = L.map('m', { zoomControl: false, attributionControl: true }).setView([24.86, 67.01], 12);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-  maxZoom: 19, attribution: '&copy; OpenStreetMap &copy; CARTO' }).addTo(map);
+var osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }), tileErrors = 0;
+osm.on('tileerror', function () {
+  if (++tileErrors !== 3) return;
+  map.removeLayer(osm);
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19, attribution: 'Tiles &copy; Esri' }).addTo(map);
+});
+osm.addTo(map);
 var layer = L.layerGroup().addTo(map), first = true;
 var COLORS = { pickup: '#0F6B5C', point: '#2449A8', rider: '#D97706' };
 window.update = function (data) {
