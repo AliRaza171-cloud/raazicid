@@ -18,7 +18,7 @@ from app.models.enums import ReportStatus, Role, SourceKind
 from app.services.locations import location_path
 from app.services.rag import embed as embedding
 from app.services.rag.finder import find_needs
-from app.services.rag.ingest import IngestError, add_report, fetch_page, fill_report
+from app.services.rag.ingest import IngestError, add_report, fetch_page, fill_report, prepare
 from app.services.rag.text import pdf_pages
 
 router = APIRouter(tags=["reports"])
@@ -170,6 +170,8 @@ def upload(file: UploadFile = File(...), title: Optional[str] = Form(None), publ
            published_at: Optional[str] = Form(None), admin: User = Depends(admin_only), db: Session = Depends(get_db)):
     """A PDF or text file: situation reports, IPC analyses, NGO assessments, our own field notes.
     A plain (not async) function: reading a long PDF and making vectors runs in a worker thread, not blocking the API."""
+    admin_id = admin.id
+    db.commit()   # no open transaction while the PDF is read and vectors are made
     name = (file.filename or "report").strip()
     data = file.file.read(settings.MAX_UPLOAD_MB * 1024 * 1024 + 1)
     if len(data) > settings.MAX_UPLOAD_MB * 1024 * 1024:
@@ -187,7 +189,7 @@ def upload(file: UploadFile = File(...), title: Optional[str] = Form(None), publ
     clean_title = (title or "").strip() or name.rsplit(".", 1)[0].replace("_", " ").replace("-", " ")
     try:
         r, created = add_report(db, kind=SourceKind.upload, title=clean_title, pages=pages, publisher=(publisher or "").strip() or None,
-                                published_at=_when(published_at), uploaded_by=admin.id)
+                                published_at=_when(published_at), uploaded_by=admin_id)
     except IngestError as e:
         raise api_error(422, "unreadable", str(e))
     if not created:
@@ -198,10 +200,12 @@ def upload(file: UploadFile = File(...), title: Optional[str] = Form(None), publ
 @router.post("/admin/reports/link", response_model=ReportDetail, status_code=201)
 def add_link(body: LinkIn, admin: User = Depends(admin_only), db: Session = Depends(get_db)):
     """Read a news article, NDMA / PDMA page or online PDF and add its text."""
+    admin_id = admin.id
+    db.commit()
     try:
         page_title, pages, host = fetch_page(body.url)
         r, created = add_report(db, kind=SourceKind.upload, title=body.title or page_title or body.url, pages=pages, url=body.url.strip(),
-                                publisher=body.publisher or host, uploaded_by=admin.id)
+                                publisher=body.publisher or host, uploaded_by=admin_id)
     except IngestError as e:
         raise api_error(422, "unreadable", str(e))
     if not created:
@@ -215,9 +219,13 @@ def fetch_text(report_id: uuid.UUID, _: User = Depends(admin_only), db: Session 
     r = _get(db, report_id)
     if not r.url:
         raise api_error(422, "no_link", "This report has no link")
+    url, title = r.url, r.title
+    db.commit()   # the page download and vectors happen outside a transaction
     try:
-        _, pages, _host = fetch_page(r.url)
-        fill_report(db, r, pages)
+        _, pages, _host = fetch_page(url)
+        prepared = prepare(title, pages)
+        r = _get(db, report_id)
+        fill_report(db, r, pages, prepared)
         db.commit()
     except IngestError as e:
         db.rollback()
@@ -265,17 +273,18 @@ def restore(report_id: uuid.UUID, _: User = Depends(admin_only), db: Session = D
 @router.post("/admin/rag/embed-missing")
 def embed_missing(_: User = Depends(admin_only), db: Session = Depends(get_db)):
     """After installing sentence-transformers: add vectors to passages stored without one."""
-    todo = list(db.scalars(select(ReportChunk).where(ReportChunk.embedding.is_(None)).limit(2000)))
-    if not todo:
+    rows = db.execute(select(ReportChunk.id, Report.title, ReportChunk.text).join(Report, Report.id == ReportChunk.report_id)
+                      .where(ReportChunk.embedding.is_(None)).limit(2000)).all()
+    if not rows:
         return {"done": 0, "note": "Every passage already has a vector"}
-    titles = dict(db.execute(select(Report.id, Report.title).where(Report.id.in_({c.report_id for c in todo}))).all())
-    vecs = embedding.embed([f"{titles.get(c.report_id, '')}\n{c.text}" for c in todo])
+    db.commit()   # making vectors can take a while: no open transaction meanwhile
+    vecs = embedding.embed([f"{title}\n{text}" for _, title, text in rows])
     if vecs is None:
         raise api_error(503, "embeddings_off", embedding.status()["note"])
-    for c, v in zip(todo, vecs):
-        c.embedding = v
+    for (cid, _, _), v in zip(rows, vecs):
+        db.get(ReportChunk, cid).embedding = v
     db.commit()
-    return {"done": len(todo), "note": f"Added vectors to {len(todo)} passages"}
+    return {"done": len(rows), "note": f"Added vectors to {len(rows)} passages"}
 
 
 # ---------- need finder ----------

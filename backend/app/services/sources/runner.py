@@ -44,8 +44,10 @@ def run_source(db: Session, kind: SourceKind) -> tuple[bool, str]:
     source = db.scalar(select(Source).where(Source.kind == kind))
     if source is None or kind not in RUNNERS:
         return False, "This source cannot be run yet"
+    source_id = source.id
+    db.commit()   # no transaction held during slow downloads / the Claude scan
     try:
-        status = RUNNERS[kind](db, source.id)
+        status = RUNNERS[kind](db, source_id)
         fill_alert_needs(db)
         needs.recompute(db)
         ok = True

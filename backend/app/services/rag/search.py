@@ -77,11 +77,10 @@ def _base(db: Session, location_id: Optional[uuid.UUID]):
     return stmt
 
 
-def vector_ids(db: Session, question: str, location_id: Optional[uuid.UUID], limit: int) -> list[uuid.UUID]:
-    vec = embed([question])
-    if not vec:
+def vector_ids(db: Session, qvec: Optional[list[float]], location_id: Optional[uuid.UUID], limit: int) -> list[uuid.UUID]:
+    if not qvec:
         return []
-    dist = ReportChunk.embedding.cosine_distance(vec[0])
+    dist = ReportChunk.embedding.cosine_distance(qvec)
     stmt = _base(db, location_id).where(ReportChunk.embedding.isnot(None)).order_by(dist).limit(limit)
     return list(db.scalars(stmt))
 
@@ -97,12 +96,22 @@ def keyword_ids(db: Session, question: str, location_id: Optional[uuid.UUID], li
     return list(db.scalars(stmt))
 
 
-def search(db: Session, question: str, location_id: Optional[uuid.UUID] = None, k: int = 8) -> list[Hit]:
-    rankings = {"meaning": vector_ids(db, question, location_id, k * 3), "words": keyword_ids(db, question, location_id, k * 3)}
+def query_vector(question: str) -> Optional[list[float]]:
+    """The question as a vector, or None (embeddings off, or the model is still loading: keyword search only)."""
+    vec = embed([question], wait=False)
+    return vec[0] if vec else None
+
+
+def search(db: Session, question: str, location_id: Optional[uuid.UUID] = None, k: int = 8,
+           qvec: Optional[list[float]] = None) -> list[Hit]:
+    """Pass `qvec` (from query_vector) when you made it before opening a database transaction."""
+    if qvec is None:
+        qvec = query_vector(question)
+    rankings = {"meaning": vector_ids(db, qvec, location_id, k * 3), "words": keyword_ids(db, question, location_id, k * 3)}
     fused = rrf(rankings)
     if location_id and len(fused) < 3:
         # Little about this place in the library: also use passages from anywhere, ranked lower
-        wide = rrf({"meaning": vector_ids(db, question, None, k * 2), "words": keyword_ids(db, question, None, k * 2)})
+        wide = rrf({"meaning": vector_ids(db, qvec, None, k * 2), "words": keyword_ids(db, question, None, k * 2)})
         for cid, (s, how) in wide.items():
             fused.setdefault(cid, (s * 0.5, how))
     top = sorted(fused.items(), key=lambda kv: -kv[1][0])[:k]

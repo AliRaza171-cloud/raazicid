@@ -54,15 +54,23 @@ def tag_chunks(chunks: list[ReportChunk], title: str, places: list[Place]) -> in
     return tagged
 
 
-def fill_report(db: Session, report: Report, pages: list[Page]) -> Report:
-    """Replace the report's passages with new ones from `pages`."""
+Prepared = tuple[list[dict], Optional[list[list[float]]]]
+
+
+def prepare(title: str, pages: list[Page]) -> Prepared:
+    """Passages and their vectors. No database work, so it may take as long as it needs (long PDFs, first model load)."""
     pieces = chunk_pages(pages)
     if not pieces:
         raise IngestError("No readable text found. Scanned PDFs (photos of pages) cannot be read yet.")
+    return pieces, embed([f"{title}\n{p['text']}" for p in pieces])
+
+
+def fill_report(db: Session, report: Report, pages: list[Page], prepared: Optional[Prepared] = None) -> Report:
+    """Replace the report's passages with new ones from `pages`."""
+    pieces, vecs = prepared or prepare(report.title, pages)
     report.chunks.clear()
     db.flush()
     chunks = [ReportChunk(chunk_index=i, page=p["page"], text=p["text"]) for i, p in enumerate(pieces)]
-    vecs = embed([f"{report.title}\n{c.text}" for c in chunks])
     if vecs:
         for c, v in zip(chunks, vecs):
             c.embedding = v
@@ -77,6 +85,7 @@ def add_report(db: Session, *, kind: SourceKind, title: str, pages: list[Page], 
                external_id: Optional[str] = None, uploaded_by: Optional[uuid.UUID] = None) -> tuple[Report, bool]:
     """(report, created). The same text or the same link is never stored twice."""
     title = " ".join(title.split())[:300] or "Untitled report"
+    prepared = prepare(title, pages)   # before any query: no transaction is held while vectors are made
     sid = source_id(db, kind)
     if external_id:
         same = db.scalar(select(Report).where(Report.source_id == sid, Report.external_id == external_id))
@@ -97,7 +106,7 @@ def add_report(db: Session, *, kind: SourceKind, title: str, pages: list[Page], 
     else:
         report.title = report.title or title
         report.publisher = report.publisher or publisher
-    fill_report(db, report, pages)
+    fill_report(db, report, pages, prepared)
     db.commit()
     db.refresh(report)
     return report, True

@@ -21,7 +21,7 @@ from app.services.claude import ClaudeError, ask_complete, extract_json, text_an
 from app.services.gazetteer import find_places, load_places
 from app.services.locations import descendant_ids, location_path
 from app.services.needs import LEVEL_NAMES
-from app.services.rag.search import Hit, search
+from app.services.rag.search import Hit, query_vector, search
 
 WEB_DOMAINS = None   # None = any site; Claude is told to prefer official and humanitarian sources
 LEVEL_WORDS = {"urgent": 3, "high": 2, "some": 1}
@@ -128,17 +128,22 @@ def match_areas(db: Session, areas: list[dict], category_id: Optional[int]) -> l
 
 def find_needs(db: Session, question: str, location_id: Optional[uuid.UUID] = None, category_id: Optional[int] = None,
                web_search: bool = False) -> dict[str, Any]:
+    db.commit()   # close the transaction left open by the login check: slow steps below must not hold one
     place = " › ".join(location_path(db, location_id)) if location_id else None
     cat = db.get(Category, category_id) if category_id else None
-    query = " ".join(x for x in [question, cat.name if cat else "", place.split(" › ")[-1] if place else ""] if x)
-    hits = search(db, query, location_id, k=8)
+    cat_name = cat.name if cat else None   # plain values: reading ORM objects after a commit would reopen a transaction
+    query = " ".join(x for x in [question, cat_name or "", place.split(" › ")[-1] if place else ""] if x)
+    db.commit()
+    qvec = query_vector(query)
+    hits = search(db, query, location_id, k=8, qvec=qvec)
     facts = need_facts(db, location_id, category_id)
+    db.commit()   # Neon closes connections idle inside a transaction; Claude (with web search) can take minutes
 
     sources = [{"id": f"S{i}", "report_id": str(h.report_id), "chunk_id": str(h.chunk_id), "title": h.title,
                 "publisher": h.publisher or h.source, "url": h.url, "page": h.page,
                 "date": h.published_at.isoformat() if h.published_at else None, "text": h.text, "places": h.places,
                 "found_by": h.how} for i, h in enumerate(hits, start=1)]
-    base = {"question": question, "place": place, "category": cat.name if cat else None, "sources": sources,
+    base = {"question": question, "place": place, "category": cat_name, "sources": sources,
             "facts": facts, "web_results": [], "used_web": False, "model": settings.CLAUDE_MODEL}
 
     if not settings.ANTHROPIC_API_KEY:
@@ -152,7 +157,7 @@ def find_needs(db: Session, question: str, location_id: Optional[uuid.UUID] = No
             tool["allowed_domains"] = WEB_DOMAINS
         tools = [tool]
     try:
-        res = ask_complete([{"role": "user", "content": build_prompt(question, place, cat.name if cat else None, hits, facts, web_search)}],
+        res = ask_complete([{"role": "user", "content": build_prompt(question, place, cat_name, hits, facts, web_search)}],
                   system=SYSTEM, tools=tools, max_tokens=2000, timeout=150)
     except ClaudeError as e:
         return {**base, "answer": f"Claude could not answer just now ({e}). The passages and need levels below are still useful.",

@@ -7,11 +7,13 @@ from app.api.routes import (admin_donations, admin_riders, ai, alerts, appeals, 
                             reports, rider)
 from app.core.config import settings
 from app.scheduler import start as start_scheduler
+from app.services.rag.embed import warm_up as warm_up_embeddings
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     scheduler = start_scheduler()   # Phase 6: fetch GDACS / HDX data and refresh need levels in the background
+    warm_up_embeddings()            # Phase 6B: load the vector-search model in the background
     yield
     if scheduler:
         scheduler.shutdown(wait=False)
