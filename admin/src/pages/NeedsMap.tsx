@@ -388,7 +388,7 @@ function Reasons({ picked }: { picked: Picked }) {
           </li>
         ))}
       </ul>
-      <p className="muted small" style={{ margin: 0 }}>Score = the strongest reason, plus 5 for each other strong one. 80+ urgent, 55+ high, 30+ some. Data over a year old counts less.</p>
+      <p className="muted small" style={{ margin: 0 }}>Score = the strongest reason, plus 5 for each other strong one. 80+ urgent, 55+ high, 30+ some. Data over a year old counts less; over 2 years old is not used.</p>
     </>
   );
 }
@@ -502,7 +502,9 @@ function Summary({ here, data, onPick }: { here: Crumb; data: AreaNeeds | null; 
         </p>
       )}
       <p className="muted small" style={{ margin: 0 }}>
-        Data: IPC food insecurity, WFP food prices and poverty rates (HDX, daily), GDACS and news alerts (every 30 min), and what people ask for at our distribution points.
+        Only evidence from the last 2 years counts: IPC food insecurity and WFP food prices (HDX), the AI scan of recent
+        news and UN / NGO reports, disaster alerts, rainfall and what people ask for at our points. An empty cell means no
+        recent evidence yet: run <strong>Update … with AI</strong> for that province.
       </p>
     </>
   );

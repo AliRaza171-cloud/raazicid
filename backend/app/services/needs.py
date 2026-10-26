@@ -12,8 +12,8 @@ strong signal). Signals:
   Rainfall vs long-term average (3 months) +100% 50 · +60% 40 (flood risk) · -60% 50 · -40% 35 (drought risk)
   AI web scan of the last 90 days          urgent 70 · high 55 · some 35 (with its source link)
 
-Data more than a year old counts 0.75, more than two years 0.5 (poverty, which changes slowly: never below 0.75),
-and its reason says "(old data, 2022)".
+Data more than a year old counts 0.75 (poverty, which changes slowly, keeps 0.75) and its reason says
+"(old data, 2025)". Data older than NEED_DATA_MAX_YEARS (default 2) is not used at all.
 
 3W (who works where, OCHA) does not change the level: it marks a place "neglected" for a category when the need
 is high or urgent and no organisation works on it there.
@@ -27,6 +27,7 @@ from typing import Any, Optional
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models import AlertNeed, Category, DisasterAlert, DistributionPoint, Location, NeedIndicator, NeedLevel, PointRequest
 from app.models.enums import AlertSeverity, AlertStatus, AlertType, RequestStatus
 from app.services.locations import descendant_ids
@@ -113,6 +114,14 @@ def score_ai(level: float) -> int:
     return AI_POINTS.get(int(level), 0)
 
 
+def too_old(period_end: Optional[date], today: Optional[date] = None) -> bool:
+    """Data older than NEED_DATA_MAX_YEARS is left out of the need levels."""
+    if period_end is None:
+        return False
+    today = today or datetime.now(timezone.utc).date()
+    return (today - period_end).days > settings.NEED_DATA_MAX_YEARS * 365
+
+
 def age_factor(period_end: Optional[date], today: Optional[date] = None) -> tuple[float, Optional[str]]:
     """(weight, year label if old). Up to 1 year old: full weight; up to 2 years: 0.75; older: 0.5."""
     if period_end is None:
@@ -190,6 +199,8 @@ def recompute(db: Session) -> int:
     for ind in db.scalars(select(NeedIndicator)):
         if ind.indicator == "orgs_present":
             continue   # who works where: not a need signal
+        if too_old(ind.period_end):
+            continue   # e.g. the 2018 poverty survey: too old to say what people need today
         when = ind.period_end.strftime("%b %Y") if ind.period_end else None
         age["factor"], age["old"] = age_factor(ind.period_end)
         if ind.indicator in SLOW_CHANGING:

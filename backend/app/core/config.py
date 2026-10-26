@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     HDX_EMAIL: str = ""               # your email; HDX HAPI needs it to identify the app (free, no sign-up)
     WEB_SCAN_EVERY_HOURS: int = 0     # AI web scan for new disasters: 0 = only when an admin presses the button
     AI_NEEDS_EVERY_DAYS: int = 0      # AI web scan for current needs across Pakistan: 0 = only from the admin button
+    NEED_DATA_MAX_YEARS: float = 2    # data older than this (e.g. the 2018 poverty survey) is not used for need levels
 
     # RAG embeddings (PyTorch / sentence-transformers). 384 = size of the MiniLM models.
     EMBEDDING_MODEL: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"

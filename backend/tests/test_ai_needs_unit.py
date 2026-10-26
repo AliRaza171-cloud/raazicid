@@ -2,7 +2,7 @@
 
 from datetime import date
 
-from app.services.needs import age_factor, score_ai
+from app.services.needs import age_factor, score_ai, too_old
 from app.services.sources.ai_needs import combine, parse, shows_gap
 
 TODAY = date(2026, 10, 25)
@@ -81,3 +81,17 @@ def test_aid_handed_out_is_not_a_need():
     assert shows_gap("WFP distributed 5,000 food packs, but 12,000 families are still waiting.")
     assert shows_gap("", "no assistance has reached the villages")
     assert shows_gap("Schools in Kech ran out of textbooks.") and shows_gap("300 families need hygiene kits.")
+
+
+def test_data_older_than_two_years_is_not_used(monkeypatch=None):
+    from app.core.config import settings
+    old = getattr(settings, "NEED_DATA_MAX_YEARS", None)
+    settings.NEED_DATA_MAX_YEARS = 2
+    try:
+        assert too_old(date(2018, 12, 31), TODAY) and too_old(date(2024, 10, 1), TODAY)
+        assert not too_old(date(2025, 6, 30), TODAY) and not too_old(None, TODAY)
+    finally:
+        if old is None:
+            del settings.NEED_DATA_MAX_YEARS
+        else:
+            settings.NEED_DATA_MAX_YEARS = old
