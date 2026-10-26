@@ -3,7 +3,7 @@
 from datetime import date
 
 from app.services.needs import age_factor, score_ai
-from app.services.sources.ai_needs import combine, parse
+from app.services.sources.ai_needs import combine, parse, shows_gap
 
 TODAY = date(2026, 10, 25)
 
@@ -11,22 +11,31 @@ REPLY = """I searched recent reports.
 ```json
 {"needs": [
   {"area": "Tharparkar", "province": "Sindh", "categories": ["food", "Grocery_Ration", "toys"], "level": "Urgent",
-   "why": "WFP says 40% of families eat one meal a day.", "date": "2026-10-02",
+   "why": "WFP says 40% of families eat one meal a day.", "unmet": "families still lack enough food", "reached": "partial",
+   "date": "2026-10-02",
    "sources": [{"url": "https://www.wfp.org/news/x", "title": "WFP Pakistan update"}, {"url": "not a link"}]},
   {"area": "Swat", "province": "KP", "categories": ["blankets"], "level": "high", "why": "Cold wave.", "date": "2025-12-01",
    "sources": []},
   {"area": "", "categories": ["food"]},
   {"area": "Quetta", "province": "Balochistan", "categories": ["unknown"], "level": "some", "date": "2026-10-20"},
-  {"area": "Gilgit", "province": "GB", "categories": ["winter_support"], "level": "whatever", "date": "not a date"}
+  {"area": "Gilgit", "province": "GB", "categories": ["winter_support"], "level": "whatever", "date": "not a date",
+   "why": "Families in high valleys are without warm clothes.", "reached": "none"},
+  {"area": "Mohmand", "province": "KP", "categories": ["blankets"], "level": "high", "date": "2026-09-30",
+   "why": "NDMA reported 370 tents, 160 blankets and 200 quilts for Mohmand.", "unmet": ""},
+  {"area": "Bajaur", "province": "KP", "categories": ["blankets"], "level": "high", "date": "2026-09-30",
+   "why": "Displaced families still waiting for blankets.", "sources": [{"url": "https://sitreps.ndma.gov.pk/province-dark/3"}]}
 ]}
 ```"""
 
 
 def test_parse_keeps_recent_known_needs():
     items = parse(REPLY, TODAY)
-    assert [i["area"] for i in items] == ["Tharparkar", "Gilgit"]       # old Swat news, empty area, unknown category dropped
+    # dropped: old Swat news, empty area, unknown category, Mohmand (aid handed out, no gap), Bajaur (only an NDMA sitrep)
+    assert [i["area"] for i in items] == ["Tharparkar", "Gilgit"]
     thar, gilgit = items
-    assert thar["categories"] == ["food", "grocery_ration"] and thar["level"] == 3 and thar["date"] == date(2026, 10, 2)
+    assert thar["categories"] == ["food", "grocery_ration"] and thar["date"] == date(2026, 10, 2)
+    assert thar["level"] == 2 and thar["reached"] == "partial"          # urgent, but some aid arrives: high
+    assert gilgit["reached"] == "none" and thar["unmet"] == "families still lack enough food"
     assert thar["sources"] == [{"url": "https://www.wfp.org/news/x", "title": "WFP Pakistan update"}]
     assert gilgit["level"] == 1 and gilgit["date"] == TODAY             # unknown level: "some"; no date: today
     assert parse("no json here", TODAY) == [] and parse('{"needs": []}', TODAY) == []
@@ -62,5 +71,13 @@ def test_one_source_cannot_fill_the_scan():
 
 
 def test_theme_only_keeps_its_categories():
-    text = '{"needs": [{"area": "Swat", "categories": ["blankets", "food"], "level": "high", "date": "2026-10-20"}]}'
+    text = '{"needs": [{"area": "Swat", "categories": ["blankets", "food"], "level": "high", "date": "2026-10-20", "why": "Families need blankets."}]}'
     assert parse(text, TODAY, allowed=["blankets", "winter_support"])[0]["categories"] == ["blankets"]
+
+
+def test_aid_handed_out_is_not_a_need():
+    assert not shows_gap("NDMA reported 370 tents, 160 blankets and 200 quilts for Mohmand on 30 September.")
+    assert not shows_gap("WFP distributed 5,000 food packs in Dadu.")
+    assert shows_gap("WFP distributed 5,000 food packs, but 12,000 families are still waiting.")
+    assert shows_gap("", "no assistance has reached the villages")
+    assert shows_gap("Schools in Kech ran out of textbooks.") and shows_gap("300 families need hygiene kits.")

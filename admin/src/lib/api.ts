@@ -345,6 +345,8 @@ export interface NeedReason {
   alert_id?: string;
   url?: string | null;   // source link (AI web scan)
   old?: boolean;         // data more than a year old (counts less)
+  quote?: string | null; // AI web scan: the source's words that show the gap
+  reached?: "none" | "partial" | "unknown";
 }
 
 export interface AreaNeed {

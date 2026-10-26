@@ -60,7 +60,7 @@ def not_set_up() -> str:
 
 def complete(prompt: str, *, system: Optional[str] = None, web: Optional[dict[str, Any]] = None, images: Optional[list[str]] = None,
              max_tokens: int = 2000, timeout: float = 150) -> Answer:
-    """Ask the model. web = {"max_uses": 4, "allowed_domains": [...] or None} turns on web search.
+    """Ask the model. web = {"max_uses": 4, "allowed_domains": [...] or "blocked_domains": [...]} turns on web search.
     images = public https URLs shown before the prompt (document check)."""
     if not available():
         raise LLMError(not_set_up())
@@ -81,8 +81,11 @@ def openai_body(prompt: str, system: Optional[str], web: Optional[dict], images:
         body["instructions"] = system
     if web is not None:
         tool: dict[str, Any] = {"type": "web_search", "search_context_size": "medium"}
+        clean = lambda ds: [d.replace("https://", "").replace("http://", "").strip("/") for d in ds][:100]
         if web.get("allowed_domains"):
-            tool["filters"] = {"allowed_domains": [d.replace("https://", "").replace("http://", "").strip("/") for d in web["allowed_domains"]][:100]}
+            tool["filters"] = {"allowed_domains": clean(web["allowed_domains"])}
+        elif web.get("blocked_domains"):
+            tool["filters"] = {"blocked_domains": clean(web["blocked_domains"])}
         body["tools"] = [tool]
         body["include"] = ["web_search_call.action.sources"]
     return body
@@ -149,6 +152,8 @@ def _claude(prompt, system, web, images, max_tokens, timeout) -> Answer:
         tool: dict[str, Any] = {"type": "web_search_20250305", "name": "web_search", "max_uses": int(web.get("max_uses") or 4)}
         if web.get("allowed_domains"):
             tool["allowed_domains"] = web["allowed_domains"]
+        elif web.get("blocked_domains"):
+            tool["blocked_domains"] = web["blocked_domains"]
         tools = [tool]
     try:
         res = ask_complete([{"role": "user", "content": content}], system=system, tools=tools, max_tokens=max_tokens, timeout=timeout)

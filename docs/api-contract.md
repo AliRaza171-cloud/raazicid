@@ -285,8 +285,10 @@ A place shows the highest level found anywhere inside it.
 - *AI web scan* (`/admin/needs/ai-scan`, or `AI_NEEDS_EVERY_DAYS`): the AI (OpenAI or Claude) runs three searches at
   once (food and rations; shelter, winter and relief; health, hygiene and education) over news, UN and NGO reports
   from the last 90 days for one province (or all Pakistan), and returns needs per district with source links:
-  urgent 70, high 55, some 35. At most 2 findings come from any one page, and aid already delivered only counts when
-  the source says gaps remain. A scan replaces the previous one for that province; findings expire after 120 days.
+  urgent 70, high 55, some 35, plus 10 when no aid has reached the people yet. It looks for UNMET needs: each finding
+  must quote the source's words showing the gap ("still waiting", "no assistance", "ran out"); findings that only say
+  aid was distributed are dropped by a code check, also for stored older scans. At most 2 findings come from any one
+  page, and NDMA's sitrep site (tables of relief handed out) is not searched. A scan replaces the previous one for that province; findings expire after 120 days.
 
 ```json
 // GET /needs?parent_id=<sindh-id>

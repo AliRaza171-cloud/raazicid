@@ -6,6 +6,7 @@ area" look out of date. This scan adds fresh, linked evidence. One scan per prov
 admin starts it (or set AI_NEEDS_EVERY_DAYS). Each scan replaces the previous one for the same province.
 """
 
+import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
@@ -41,6 +42,21 @@ THEMES = [
      "UNICEF, WHO, UNFPA, UNESCO, out-of-school children, textbooks, sanitation, disability"),
 ]
 PER_SOURCE = 2   # at most this many findings from any one page
+# NDMA's sitrep site is mostly tables of relief already handed out: not evidence that people still need it
+BLOCKED = ["sitreps.ndma.gov.pk"]
+REACHED = {"none": "no aid has reached them yet", "partial": "some aid has reached them, not enough", "unknown": ""}
+
+# A finding must show a gap: words that say people still lack something. Aid handed out, on its own, is not a need.
+GAP = re.compile(r"\b(unmet|gaps?|shortages?|short of|lack\w*|still (need|wait|without|in need|lack)\w*|waiting|"
+                 r"not (yet )?(received|reached|been reached)|no (aid|assistance|help|relief|support)|unreached|hard[- ]to[- ]reach|"
+                 r"without \w+|ran out|out of stock|insufficient|inadequate|"
+                 r"needs?|needed|needing|require[sd]?|requirements?|demand|left out|neglected|inaccessible|cut off)\b", re.I)
+
+
+def shows_gap(*texts: str) -> bool:
+    """True when the text says people still lack something. Aid handed out, on its own, is not a need."""
+    joined = " ".join(t for t in texts if t)
+    return bool(GAP.search(joined))
 
 PROMPT = """Today is {today}. Search the web for reports from the last 90 days about {theme} needs in {scope}.
 Good places to look: {hint}, NGOs and major Pakistani news. Use several different sources.
@@ -54,16 +70,22 @@ Reply with JSON only, inside ```json fences:
   "province": "province",
   "categories": ["{example}"],
   "level": "urgent | high | some",
-  "why": "one plain sentence with the numbers the source gives",
+  "why": "one plain sentence: who still lacks what, with the numbers the source gives",
+  "unmet": "a short quote from the source that shows the gap, e.g. 'families are still waiting for blankets'",
+  "reached": "none | partial | unknown  (has any aid reached these people yet?)",
   "date": "YYYY-MM-DD (date of the source)",
   "sources": [{{"url": "https://...", "title": "..."}}]
 }}]}}
+We look for UNMET needs: people who still lack something and whom nobody, or too few, have helped yet.
+Search for words like "unmet needs", "still waiting", "not yet received", "no assistance", "hard to reach",
+"gaps", "shortage", "ran out".
 Rules:
-- Only needs stated in sources from the last 90 days. Never guess numbers or places.
-- Aid already delivered (for example "NDMA distributed 5,000 food packs") is NOT a need by itself. Only list it when
-  the source says more is needed, stocks ran out, or families are still waiting.
+- Only unmet needs stated in sources from the last 90 days. Never guess numbers or places.
+- Aid that was distributed, provided or delivered is NOT a need. Leave it out unless the same source says people
+  still lack it, stocks ran out or more is needed; then "unmet" must quote that sentence.
+- Every item needs an "unmet" quote. No quote, no item.
 - At most {per_source} items from the same source; use different sources for different areas.
-- "urgent": the source says many people lack it now. "high": a clear, large shortage. "some": a smaller or partial gap.
+- "urgent": many people lack it now and no aid has reached them. "high": a clear, large gap. "some": a smaller or partial gap.
 - Name a district or city whenever the source does. At most 8 items, most serious first.
 If nothing qualifies, reply {{"needs": []}}."""
 
@@ -91,11 +113,20 @@ def parse(text: str, today: Optional[date] = None, allowed: Optional[list[str]] 
             when = today
         if (today - when).days > MAX_AGE_DAYS:
             continue   # old news: the UN datasets already cover the past
+        why, unmet = str(n.get("why") or "")[:400], str(n.get("unmet") or "")[:300]
+        if not shows_gap(why, unmet):
+            continue   # aid handed out, or no sign anyone still lacks it: not an unmet need
         sources = [{"url": s["url"], "title": str(s.get("title") or s["url"])[:200]}
                    for s in n.get("sources") or [] if isinstance(s, dict) and str(s.get("url", "")).startswith("http")][:3]
+        if sources and all(any(b in s["url"] for b in BLOCKED) for s in sources):
+            continue
+        reached = str(n.get("reached") or "unknown").strip().lower()
+        reached = reached if reached in REACHED else "unknown"
+        level = LEVELS.get(str(n.get("level") or "").strip().lower(), 1)
+        if reached == "partial" and level == 3:
+            level = 2   # some help is arriving: high, not urgent
         out.append({"area": str(n["area"]).strip()[:120], "province": str(n.get("province") or "").strip()[:60], "categories": cats,
-                    "level": LEVELS.get(str(n.get("level") or "").strip().lower(), 1), "why": str(n.get("why") or "")[:400],
-                    "date": when, "sources": sources})
+                    "level": level, "why": why, "unmet": unmet, "reached": reached, "date": when, "sources": sources})
     return out[:15]
 
 
@@ -107,7 +138,8 @@ def combine(groups: list[list[dict[str, Any]]], per_source: int = PER_SOURCE) ->
     """Merge the theme searches: at most `per_source` findings per page, and one finding per area and category
     (the most serious, then the newest)."""
     pool = [it for g in groups for it in g]
-    pool.sort(key=lambda it: (-it["level"], -it["date"].toordinal()))
+    first = {"none": 0, "unknown": 1, "partial": 2}
+    pool.sort(key=lambda it: (-it["level"], first.get(it.get("reached", "unknown"), 1), -it["date"].toordinal()))
     used: dict[str, int] = {}
     seen: set[tuple[str, str]] = set()
     out = []
@@ -129,7 +161,7 @@ def _scan_theme(scope: str, theme: tuple[str, list[str], str], today: datetime) 
     name, cats, hint = theme
     prompt = PROMPT.format(today=today.strftime("%d %B %Y"), theme=name, scope=scope, hint=hint, per_source=PER_SOURCE,
                            categories=", ".join(CATEGORY_TEXT[c] for c in cats), example=cats[0])
-    res = llm.complete(prompt, web={"max_uses": 4, "allowed_domains": None}, max_tokens=2500, timeout=240)
+    res = llm.complete(prompt, web={"max_uses": 4, "blocked_domains": BLOCKED}, max_tokens=2500, timeout=240)
     items = parse(res.text, today.date(), allowed=cats)
     if res.citations:   # items without their own links get the pages the AI quoted
         for it in items:
@@ -176,7 +208,8 @@ def sync(db: Session, items: list[dict[str, Any]], source_id: int, province_id: 
         for slug in it["categories"]:
             db.add(NeedIndicator(location_id=loc.id, category_id=cat_ids.get(slug), indicator="ai_need", value=it["level"],
                                  period_start=it["date"], period_end=it["date"], source_id=source_id,
-                                 meta={"why": it["why"], "sources": it["sources"], "area": it["area"], "model": llm.label()}))
+                                 meta={"why": it["why"], "unmet": it.get("unmet", ""), "reached": it.get("reached", "unknown"),
+                                       "sources": it["sources"], "area": it["area"], "model": llm.label()}))
         added += 1
     db.commit()
     where = "" if not skipped else f" ({skipped} not matched to our places)"

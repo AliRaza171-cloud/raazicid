@@ -376,7 +376,9 @@ function Reasons({ picked }: { picked: Picked }) {
       <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 10 }}>
         {picked.need.reasons.map((r, i) => (
           <li key={i} style={{ opacity: r.old ? 0.7 : 1 }}>
+            {r.reached === "none" && <span className="chip bad" style={{ marginBottom: 4 }}>Nobody has reached them yet</span>}
             <div style={{ fontWeight: 600 }}>{r.why}</div>
+            {r.quote && <div className="small" style={{ fontStyle: "italic", color: "var(--ink-2)" }}>“{r.quote}”</div>}
             <div className="muted small">
               {r.source}{r.date ? ` · ${r.date}` : ""}{r.place && r.place !== picked.place ? ` · in ${r.place}` : ""} · {r.points} points
               {r.old ? " · counts less (old)" : ""}

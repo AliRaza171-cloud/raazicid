@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from app.models import AlertNeed, Category, DisasterAlert, DistributionPoint, Location, NeedIndicator, NeedLevel, PointRequest
 from app.models.enums import AlertSeverity, AlertStatus, AlertType, RequestStatus
 from app.services.locations import descendant_ids
+from app.services.sources.ai_needs import shows_gap
 from app.services.sources.hapi_un import category_sectors, sector_categories
 
 LEVEL_NAMES = ["none", "some", "high", "urgent"]
@@ -193,9 +194,18 @@ def recompute(db: Session) -> int:
                 continue   # AI-found news expires; run the scan again for fresh evidence
             meta = ind.meta or {}
             src = (meta.get("sources") or [{}])[0]
-            r = {"why": meta.get("why") or "Reported need", "source": f"AI web scan · {src.get('title') or 'news'}"[:120],
-                 "date": ind.period_end.strftime("%d %b %Y") if ind.period_end else None, "url": src.get("url")}
-            add(ind.location_id, ids_to_slug.get(ind.category_id, ""), score_ai(ind.value), r)
+            if not shows_gap(meta.get("why") or "", meta.get("unmet") or ""):
+                continue   # an older scan's "aid handed out" finding: not an unmet need
+            reached = meta.get("reached") or "unknown"
+            why = meta.get("why") or "Reported need"
+            if reached == "none":
+                why += " No aid has reached them yet."
+            elif reached == "partial":
+                why += " Some aid has arrived, not enough."
+            r = {"why": why, "source": f"AI web scan · {src.get('title') or 'news'}"[:120], "quote": meta.get("unmet") or None,
+                 "date": ind.period_end.strftime("%d %b %Y") if ind.period_end else None, "url": src.get("url"), "reached": reached}
+            # Nobody has reached them: +10, the people RAAZICID should go to first
+            add(ind.location_id, ids_to_slug.get(ind.category_id, ""), score_ai(ind.value) + (10 if reached == "none" else 0), r)
             continue
         if ind.indicator == "ipc_phase3plus_share":
             r = {"why": f"IPC Phase 3+ (crisis or worse) for {ind.value:.0%} of people", "source": "IPC via HDX", "date": when}
