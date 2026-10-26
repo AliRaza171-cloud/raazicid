@@ -91,6 +91,7 @@ class SourceKind(str, Enum):
     pmd = "pmd"
     web_search = "web_search"
     upload = "upload"
+    ai_needs = "ai_needs"     # AI web scan for current needs (Phase 6)
 
 
 class ReportStatus(str, Enum):

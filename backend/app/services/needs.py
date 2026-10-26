@@ -10,6 +10,9 @@ strong signal). Signals:
   Open requests at a distribution point    40, or 60 if 50+ items asked for
   People in need (OCHA, by sector)         share >=40% 85 · >=25% 65 · >=10% 45; or 500k+ 75 · 100k+ 60 · 20k+ 40
   Rainfall vs long-term average (3 months) +100% 50 · +60% 40 (flood risk) · -60% 50 · -40% 35 (drought risk)
+  AI web scan of the last 90 days          urgent 70 · high 55 · some 35 (with its source link)
+
+Data more than a year old counts 0.75, more than two years 0.5, and its reason says "(old data, 2022)".
 
 3W (who works where, OCHA) does not change the level: it marks a place "neglected" for a category when the need
 is high or urgent and no organisation works on it there.
@@ -17,7 +20,7 @@ is high or urgent and no organisation works on it there.
 
 import uuid
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 from sqlalchemy import delete, select
@@ -99,6 +102,24 @@ def score_rain(anomaly_pct: float) -> tuple[int, Optional[str]]:
     return 0, None
 
 
+AI_POINTS = {3: 70, 2: 55, 1: 35}   # AI web scan alone can reach "high"; "urgent" needs a second source
+
+
+def score_ai(level: float) -> int:
+    return AI_POINTS.get(int(level), 0)
+
+
+def age_factor(period_end: Optional[date], today: Optional[date] = None) -> tuple[float, Optional[str]]:
+    """(weight, year label if old). Up to 1 year old: full weight; up to 2 years: 0.75; older: 0.5."""
+    if period_end is None:
+        return 1.0, None
+    today = today or datetime.now(timezone.utc).date()
+    days = (today - period_end).days
+    if days <= 365:
+        return 1.0, None
+    return (0.75 if days <= 730 else 0.5), str(period_end.year)
+
+
 def level_of(score: float) -> int:
     return 3 if score >= 80 else 2 if score >= 55 else 1 if score >= 30 else 0
 
@@ -149,15 +170,33 @@ def suggest_alert_needs(db: Session, alert: DisasterAlert) -> None:
 def recompute(db: Session) -> int:
     """Rebuild the need_levels table from all signals. Returns the number of (area, category) rows."""
     ids = _slug_ids(db)
+    ids_to_slug = {v: k for k, v in ids.items()}
     names = {l.id: l.name for l in db.scalars(select(Location))}
     sig: dict[tuple[uuid.UUID, int], list[tuple[int, dict]]] = defaultdict(list)
 
+    age = {"factor": 1.0, "old": None}   # set per indicator: older data counts less
+
     def add(loc: uuid.UUID, slug: str, pts: int, reason: dict, adjust: int = 0):
-        if slug in ids and pts + adjust > 0:
-            sig[(loc, ids[slug])].append((pts + adjust, reason))
+        pts = round((pts + adjust) * age["factor"])
+        if slug in ids and pts > 0:
+            if age["old"]:
+                reason = {**reason, "why": f"{reason['why']} (old data, {age['old']})", "old": True}
+            sig[(loc, ids[slug])].append((pts, reason))
 
     for ind in db.scalars(select(NeedIndicator)):
+        if ind.indicator == "orgs_present":
+            continue   # who works where: not a need signal
         when = ind.period_end.strftime("%b %Y") if ind.period_end else None
+        age["factor"], age["old"] = age_factor(ind.period_end)
+        if ind.indicator == "ai_need":
+            if ind.period_end and (datetime.now(timezone.utc).date() - ind.period_end).days > 120:
+                continue   # AI-found news expires; run the scan again for fresh evidence
+            meta = ind.meta or {}
+            src = (meta.get("sources") or [{}])[0]
+            r = {"why": meta.get("why") or "Reported need", "source": f"AI web scan · {src.get('title') or 'news'}"[:120],
+                 "date": ind.period_end.strftime("%d %b %Y") if ind.period_end else None, "url": src.get("url")}
+            add(ind.location_id, ids_to_slug.get(ind.category_id, ""), score_ai(ind.value), r)
+            continue
         if ind.indicator == "ipc_phase3plus_share":
             r = {"why": f"IPC Phase 3+ (crisis or worse) for {ind.value:.0%} of people", "source": "IPC via HDX", "date": when}
             add(ind.location_id, "food", score_ipc(ind.value), r)
@@ -190,6 +229,7 @@ def recompute(db: Session) -> int:
             for slug in ("grocery_ration", "food", "clothes", "school_supplies", "hygiene"):
                 add(ind.location_id, slug, score_poverty(ind.value), r)
 
+    age["factor"], age["old"] = 1.0, None   # alerts and requests are always recent
     since = datetime.now(timezone.utc) - timedelta(days=30)
     alerts = db.scalars(select(DisasterAlert).where(DisasterAlert.status.in_([AlertStatus.confirmed, AlertStatus.unconfirmed]),
                                                     DisasterAlert.created_at >= since))

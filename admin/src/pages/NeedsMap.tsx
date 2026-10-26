@@ -36,6 +36,8 @@ export default function NeedsMap() {
   const [focusRow, setFocusRow] = useState<string | null>(null);      // place clicked on the map
   const [focusPoint, setFocusPoint] = useState<string | null>(null);  // point clicked on the map
   const [busy, setBusy] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanMsg, setScanMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const here = trail[trail.length - 1];
@@ -70,6 +72,27 @@ export default function NeedsMap() {
     clearFocus();
     setData(null);
     setTrail((t) => t.slice(0, i + 1));
+  };
+
+  // The province we are in (or all Pakistan at the top level): the AI scan covers one province at a time
+  const scanProvince = trail.length > 1 ? trail[1] : null;
+
+  const aiScan = async () => {
+    setScanning(true);
+    setScanMsg(null);
+    setError(null);
+    try {
+      const r = await api<{ ok: boolean; status: string }>("/admin/needs/ai-scan", {
+        method: "POST", body: JSON.stringify({ location_id: scanProvince?.id ?? null }),
+      });
+      if (r.ok) setScanMsg(`AI scan of ${scanProvince?.name ?? "Pakistan"}: ${r.status}`);
+      else setError(r.status);
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setScanning(false);
+    }
   };
 
   const recompute = async () => {
@@ -158,9 +181,12 @@ export default function NeedsMap() {
 
   return (
     <>
-      <PageHeader title="Needs by area" sub="What each area needs, worked out from IPC, food prices, poverty, disasters and point requests, and whether we have a point nearby.">
+      <PageHeader title="Needs by area" sub="What each area needs: UN data (IPC, prices, poverty, people in need, rainfall), an AI scan of recent news and reports, disasters and point requests, and whether we have a point nearby.">
         <span className="muted small">Updated {ago(data?.computed_at ?? null)}</span>
-        <button className="btn ghost small" onClick={recompute} disabled={busy}>{busy ? "Working…" : "Recompute now"}</button>
+        <button className="btn ghost small" onClick={recompute} disabled={busy || scanning}>{busy ? "Working…" : "Recompute now"}</button>
+        <button className="btn small" onClick={aiScan} disabled={scanning} title="The AI searches news, UN and NGO reports from the last 90 days (1-4 minutes, a few cents)">
+          {scanning ? `Searching the web for ${scanProvince?.name ?? "Pakistan"}…` : `Update ${scanProvince?.name ?? "Pakistan"} with AI`}
+        </button>
       </PageHeader>
       <main className="page">
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
@@ -197,6 +223,8 @@ export default function NeedsMap() {
           )}
         </div>
 
+        {scanning && <div className="flash" style={{ background: "var(--info-bg)", color: "var(--info)" }} role="status">The AI is reading recent news and UN / NGO reports. This takes 1–4 minutes; you can keep using the page.</div>}
+        {scanMsg && <div className="flash ok" role="status">{scanMsg}</div>}
         {error && <div className="flash bad" role="alert">{error}</div>}
 
         <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
@@ -347,16 +375,18 @@ function Reasons({ picked }: { picked: Picked }) {
       </div>
       <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 10 }}>
         {picked.need.reasons.map((r, i) => (
-          <li key={i}>
+          <li key={i} style={{ opacity: r.old ? 0.7 : 1 }}>
             <div style={{ fontWeight: 600 }}>{r.why}</div>
             <div className="muted small">
               {r.source}{r.date ? ` · ${r.date}` : ""}{r.place && r.place !== picked.place ? ` · in ${r.place}` : ""} · {r.points} points
+              {r.old ? " · counts less (old)" : ""}
             </div>
             {r.alert_id && <Link className="small" to={`/disasters?id=${r.alert_id}`}>Open the alert</Link>}
+            {r.url && <a className="small" href={r.url} target="_blank" rel="noreferrer">Open the source</a>}
           </li>
         ))}
       </ul>
-      <p className="muted small" style={{ margin: 0 }}>Score = the strongest reason, plus 5 for each other strong one. 80+ urgent, 55+ high, 30+ some.</p>
+      <p className="muted small" style={{ margin: 0 }}>Score = the strongest reason, plus 5 for each other strong one. 80+ urgent, 55+ high, 30+ some. Data over a year old counts less.</p>
     </>
   );
 }

@@ -254,6 +254,7 @@ nearest same-day food point and is refreshed while the food waits.
 | POST | `/admin/alerts/{id}/status` | admin | `{"status": "confirmed" \| "dismissed" \| "handled" \| "unconfirmed"}` |
 | PUT | `/admin/alerts/{id}/needs` | admin | Replace "what is needed": `[{"category_id": 2, "quantity_needed": 150}]` |
 | POST | `/admin/alerts/{id}/camp` | admin | Open a relief camp (temporary distribution point, `alert_id` set) |
+| POST | `/admin/needs/ai-scan` | admin | `{"location_id": <province> \| null}`: AI web scan of the last 90 days for current needs (1–4 min) |
 | GET | `/admin/sources` | admin | Data sources with last run and result |
 | POST | `/admin/sources/{kind}/run` | admin | Fetch now: `gdacs`, `hdx_hapi`, `web_search` (Claude news scan) |
 
@@ -277,6 +278,13 @@ exist for Pakistan as a whole only, so they are saved as a short report in the l
 HAPI does not publish every subject for every country; the HDX source status names what was missing.
 
 A place shows the highest level found anywhere inside it.
+
+**Fresh data.** UN datasets are published every year or two, so two things keep the levels current:
+- *Age weighting:* data more than a year old counts 0.75, more than two years 0.5, and its reason ends with
+  "(old data, 2022)".
+- *AI web scan* (`/admin/needs/ai-scan`, or `AI_NEEDS_EVERY_DAYS`): the AI (OpenAI or Claude) searches news, UN and
+  NGO reports from the last 90 days for one province (or all Pakistan) and returns needs per district with source
+  links: urgent 70, high 55, some 35. A scan replaces the previous one for that province; findings expire after 120 days.
 
 ```json
 // GET /needs?parent_id=<sindh-id>

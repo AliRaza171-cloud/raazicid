@@ -40,7 +40,8 @@ class Settings(BaseSettings):
     # Phase 6: automatic data fetching
     ENABLE_SCHEDULER: bool = True     # set false to fetch only when an admin presses "Run now"
     HDX_EMAIL: str = ""               # your email; HDX HAPI needs it to identify the app (free, no sign-up)
-    WEB_SCAN_EVERY_HOURS: int = 0     # Claude web scan for new disasters: 0 = only when an admin presses the button
+    WEB_SCAN_EVERY_HOURS: int = 0     # AI web scan for new disasters: 0 = only when an admin presses the button
+    AI_NEEDS_EVERY_DAYS: int = 0      # AI web scan for current needs across Pakistan: 0 = only from the admin button
 
     # RAG embeddings (PyTorch / sentence-transformers). 384 = size of the MiniLM models.
     EMBEDDING_MODEL: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"

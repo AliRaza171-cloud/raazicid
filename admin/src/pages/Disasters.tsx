@@ -532,7 +532,7 @@ function Sources({ onRan }: { onRan: (msg: string) => void }) {
         <tbody>
           {shown.map((s) => (
             <tr key={s.kind}>
-              <td><strong>{s.name}</strong><div className="muted small">{s.kind === "web_search" ? "When you run it" : s.can_run ? "Automatic" : "Add RELIEFWEB_APPNAME to backend/.env once ReliefWeb approves it"}</div></td>
+              <td><strong>{s.name}</strong><div className="muted small">{s.kind === "web_search" || s.kind === "ai_needs" ? "When you run it" : s.can_run ? "Automatic" : "Add RELIEFWEB_APPNAME to backend/.env once ReliefWeb approves it"}</div></td>
               <td>{ago(s.last_run_at)}</td>
               <td style={{ maxWidth: 380 }}>
                 {s.last_status ? <span style={{ color: s.last_status.startsWith("Error") ? "var(--urgent)" : undefined }}>{s.last_status}</span> : <span className="muted">–</span>}
@@ -540,7 +540,7 @@ function Sources({ onRan }: { onRan: (msg: string) => void }) {
               <td style={{ textAlign: "right" }}>
                 {s.can_run && (
                   <button className="btn ghost small" disabled={running !== null} onClick={() => run(s)}>
-                    {running === s.kind ? "Running…" : s.kind === "web_search" ? "Scan news now" : "Run now"}
+                    {running === s.kind ? "Running…" : s.kind === "web_search" ? "Scan news now" : s.kind === "ai_needs" ? "Scan needs now" : "Run now"}
                   </button>
                 )}
               </td>

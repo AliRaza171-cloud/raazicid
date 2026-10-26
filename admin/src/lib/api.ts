@@ -343,6 +343,8 @@ export interface NeedReason {
   place?: string | null;
   points: number;
   alert_id?: string;
+  url?: string | null;   // source link (AI web scan)
+  old?: boolean;         // data more than a year old (counts less)
 }
 
 export interface AreaNeed {

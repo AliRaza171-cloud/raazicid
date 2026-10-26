@@ -2,14 +2,15 @@
 
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import DisasterAlert, Source
 from app.models.enums import AlertStatus, SourceKind
 from app.services import needs
-from app.services.sources import gdacs, hdx, reliefweb, webscan
+from app.services.sources import ai_needs, gdacs, hdx, reliefweb, webscan
 
 log = logging.getLogger("raazicid.sources")
 
@@ -28,7 +29,18 @@ def _webscan(db: Session, source_id: int) -> str:
 
 
 RUNNERS = {SourceKind.gdacs: _gdacs, SourceKind.hdx_hapi: _hdx, SourceKind.web_search: _webscan,
-           SourceKind.reliefweb: reliefweb.fetch_and_sync}
+           SourceKind.reliefweb: reliefweb.fetch_and_sync, SourceKind.ai_needs: ai_needs.run}
+NAMES = {SourceKind.ai_needs: "AI web scan for current needs"}
+
+
+def ensure_source(db: Session, kind: SourceKind) -> Source:
+    """Sources added after the first seed (e.g. the AI needs scan) are created when first used."""
+    source = db.scalar(select(Source).where(Source.kind == kind))
+    if source is None:
+        source = Source(id=(db.scalar(select(func.max(Source.id))) or 0) + 1, kind=kind, name=NAMES.get(kind, kind.value))
+        db.add(source)
+        db.commit()
+    return source
 
 
 def fill_alert_needs(db: Session) -> None:
@@ -39,15 +51,16 @@ def fill_alert_needs(db: Session) -> None:
     db.commit()
 
 
-def run_source(db: Session, kind: SourceKind) -> tuple[bool, str]:
-    """Returns (ok, status line). Never raises: the error is saved as the source's status."""
-    source = db.scalar(select(Source).where(Source.kind == kind))
+def run_source(db: Session, kind: SourceKind, options: Optional[dict] = None) -> tuple[bool, str]:
+    """Returns (ok, status line). Never raises: the error is saved as the source's status.
+    options go to the runner, e.g. {"province_id": ...} for the AI needs scan."""
+    source = ensure_source(db, kind) if kind in NAMES else db.scalar(select(Source).where(Source.kind == kind))
     if source is None or kind not in RUNNERS:
         return False, "This source cannot be run yet"
     source_id = source.id
     db.commit()   # no transaction held during slow downloads / the Claude scan
     try:
-        status = RUNNERS[kind](db, source_id)
+        status = RUNNERS[kind](db, source_id, **(options or {}))
         fill_alert_needs(db)
         needs.recompute(db)
         ok = True

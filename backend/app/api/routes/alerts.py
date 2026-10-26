@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.services import llm
 from app.core.deps import get_current_user, require_roles
 from app.core.errors import api_error
 from app.db.session import get_db
@@ -244,11 +245,15 @@ class SourceOut(BaseModel):
     can_run: bool
 
 
-RUNNABLE = {SourceKind.gdacs, SourceKind.hdx_hapi, SourceKind.web_search, SourceKind.reliefweb}
+RUNNABLE = {SourceKind.gdacs, SourceKind.hdx_hapi, SourceKind.web_search, SourceKind.reliefweb, SourceKind.ai_needs}
 
 
 def can_run(kind: SourceKind) -> bool:
-    return kind in RUNNABLE and (kind != SourceKind.reliefweb or bool(settings.RELIEFWEB_APPNAME))
+    if kind == SourceKind.reliefweb:
+        return bool(settings.RELIEFWEB_APPNAME)
+    if kind in (SourceKind.web_search, SourceKind.ai_needs):
+        return llm.available()
+    return kind in RUNNABLE
 
 
 @router.get("/admin/sources", response_model=list[SourceOut])

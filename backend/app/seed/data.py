@@ -25,6 +25,7 @@ SOURCES = [
     (5, "pmd", "PMD weather advisories", 360),
     (6, "web_search", "Claude web search", None),
     (7, "upload", "Manual upload", None),
+    (8, "ai_needs", "AI web scan for current needs", None),
 ]
 
 # Province -> cities. Rural districts from IPC/HDX (e.g. Tharparkar, Kech) are added in Phase 6

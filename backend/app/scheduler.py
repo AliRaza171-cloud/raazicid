@@ -53,6 +53,9 @@ def start():
     s.add_job(_needs_job, "interval", minutes=60, id="needs")
     if settings.RELIEFWEB_APPNAME:   # Phase 6B: reports into the library every 6 hours
         s.add_job(_job(SourceKind.reliefweb, timedelta(hours=6)), "interval", hours=6, next_run_time=now + timedelta(seconds=90), id="reliefweb")
+    if settings.AI_NEEDS_EVERY_DAYS > 0 and llm.available():   # AI web scan for current needs (all Pakistan)
+        every = timedelta(days=settings.AI_NEEDS_EVERY_DAYS)
+        s.add_job(_job(SourceKind.ai_needs, every), "interval", days=settings.AI_NEEDS_EVERY_DAYS, id="ai_needs")
     if settings.WEB_SCAN_EVERY_HOURS > 0 and llm.available():
         every = timedelta(hours=settings.WEB_SCAN_EVERY_HOURS)
         s.add_job(_job(SourceKind.web_search, every), "interval", hours=settings.WEB_SCAN_EVERY_HOURS, id="webscan")
