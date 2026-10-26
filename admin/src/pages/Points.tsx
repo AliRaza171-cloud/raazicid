@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import LocationSelect from "../components/LocationSelect";
+import PinPicker, { type Centre } from "../components/PinPicker";
 import { PageHeader } from "../components/Layout";
-import { ApiError, api, type Category, type LocationItem, type Point, type PointDetail, type PointType } from "../lib/api";
+import { ApiError, api, type Category, type Point, type PointDetail, type PointType } from "../lib/api";
 import { POINT_TYPES, date, pointTypeLabel } from "../lib/format";
 
 type Editing = { mode: "new" } | { mode: "edit"; id: string };
@@ -154,7 +155,7 @@ function PointPanel({ editing, cats, onClose, onSaved }: {
   const [error, setError] = useState<string | null>(null);
   const [far, setFar] = useState(false);          // the API said the coordinates are far from the place
   const [allowFar, setAllowFar] = useState(false);
-  const [centrePlace, setCentrePlace] = useState<LocationItem | null>(null);
+  const [centrePlace, setCentrePlace] = useState<Centre | null>(null);
 
   const fill = (p: PointDetail) => {
     setPoint(p);
@@ -163,6 +164,7 @@ function PointPanel({ editing, cats, onClose, onSaved }: {
     setLocationId(p.location_id);
     setAddress(p.address);
     setCoords(`${p.lat}, ${p.lng}`);
+    setCentrePlace(p.place_centre ?? null);
     setContactName(p.contact_name ?? "");
     setContactPhone(p.contact_phone ?? "");
     setAccepts(p.categories.map((c) => c.id));
@@ -182,7 +184,7 @@ function PointPanel({ editing, cats, onClose, onSaved }: {
     setError(null);
     // Accepts "24.8607, 67.0011" as copied from Google Maps (right-click on the map)
     const m = coords.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
-    if (!m) return setError("Coordinates should look like 24.8607, 67.0011 (latitude, longitude)");
+    if (!m) return setError(coords.trim() ? "Coordinates should look like 25.3960, 68.3578 (latitude, longitude)" : "Drop the pin on the map where the point is");
     if (!locationId) return setError("Choose the province, city and area of the point");
     const body = {
       name: name.trim(), type, location_id: locationId, address: address.trim(),
@@ -212,6 +214,10 @@ function PointPanel({ editing, cats, onClose, onSaved }: {
     }
   };
 
+  const pinMatch = coords.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
+  const pinAt = useMemo(() => (pinMatch ? { lat: parseFloat(pinMatch[1]), lng: parseFloat(pinMatch[2]) } : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [coords]);
   const coordsOk = /^\s*-?\d+(\.\d+)?\s*[, ]\s*-?\d+(\.\d+)?\s*$/.test(coords);
   const mapsLink = coordsOk ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(coords.replace(/\s+/g, ""))}` : null;
 
@@ -242,7 +248,8 @@ function PointPanel({ editing, cats, onClose, onSaved }: {
                 setFar(false);
                 setAllowFar(false);
                 // the most specific chosen place with map coordinates (not a whole province)
-                setCentrePlace([...chosen].reverse().find((c) => c.level !== "province" && c.lat != null && c.lng != null) ?? null);
+                const c = [...chosen].reverse().find((x) => x.level !== "province" && x.lat != null && x.lng != null);
+                setCentrePlace(c ? { name: c.name, lat: c.lat as number, lng: c.lng as number } : null);
               }} />
             ) : (
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -256,18 +263,20 @@ function PointPanel({ editing, cats, onClose, onSaved }: {
             <input id="paddr" className="input" value={address} onChange={(e) => setAddress(e.target.value)} required minLength={3} placeholder="Near Chakiwara Chowk, Lyari" />
           </div>
           <div>
-            <label htmlFor="pcoords">Coordinates (latitude, longitude)</label>
-            <input id="pcoords" className="input" value={coords} onChange={(e) => setCoords(e.target.value)} required placeholder="24.8607, 67.0011" />
-            <span className="muted small">In Google Maps, right-click the exact building and click the numbers to copy them (latitude first).</span>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
-              {centrePlace && (
-                <button type="button" className="btn ghost small" onClick={() => { setCoords(`${centrePlace.lat}, ${centrePlace.lng}`); setFar(false); }}>
-                  Use the centre of {centrePlace.name}
-                </button>
-              )}
-              {mapsLink && <a className="btn ghost small" href={mapsLink} target="_blank" rel="noreferrer">Check on Google Maps</a>}
-            </div>
-            {point?.place_warning && !changeLocation && <div className="flash bad" style={{ marginTop: 6 }}>{point.place_warning}</div>}
+            <label>Where is it?</label>
+            <PinPicker value={pinAt} centre={centrePlace} address={address}
+              onChange={(at) => { setCoords(`${at.lat}, ${at.lng}`); setFar(false); setError(null); }} />
+            {point?.place_warning && !changeLocation && pinAt && pinAt.lat === point.lat && pinAt.lng === point.lng && (
+              <div className="flash bad" style={{ marginTop: 6 }}>{point.place_warning} Move the pin to the right place and save.</div>
+            )}
+            <details style={{ marginTop: 8 }}>
+              <summary className="small" style={{ cursor: "pointer" }}>Type coordinates instead{pinAt ? ` (now ${pinAt.lat}, ${pinAt.lng})` : ""}</summary>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                <input id="pcoords" className="input" aria-label="Coordinates (latitude, longitude)" value={coords} onChange={(e) => setCoords(e.target.value)} placeholder="25.3960, 68.3578" />
+                <span className="muted small">From Google Maps: right-click the building and click the numbers to copy them (latitude first).</span>
+                {mapsLink && <a className="btn ghost small" style={{ alignSelf: "flex-start" }} href={mapsLink} target="_blank" rel="noreferrer">Check on Google Maps</a>}
+              </div>
+            </details>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <div style={{ flex: "1 1 140px" }}>

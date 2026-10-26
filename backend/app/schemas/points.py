@@ -85,6 +85,12 @@ class PointRequestOut(BaseModel):
     created_at: datetime
 
 
+class PlaceCentre(BaseModel):
+    name: str
+    lat: float
+    lng: float
+
+
 class PointOut(BaseModel):
     id: uuid.UUID
     name: str
@@ -104,6 +110,7 @@ class PointOut(BaseModel):
     open_requests: int
     created_at: datetime
     place_warning: Optional[str] = None   # coordinates far from the chosen place (wrong pin on the map)
+    place_centre: Optional[PlaceCentre] = None   # centre of the point's area / region / city, for the map picker
 
 
 class PointDetail(PointOut):

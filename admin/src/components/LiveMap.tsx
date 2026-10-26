@@ -23,7 +23,7 @@ const COLORS = { pickup: "#0F6B5C", point: "#2449A8", rider: "#D97706", stalled:
 type Leaflet = any;
 let loading: Promise<Leaflet> | null = null;
 
-function loadLeaflet(): Promise<Leaflet> {
+export function loadLeaflet(): Promise<Leaflet> {
   const w = window as unknown as { L?: Leaflet };
   if (w.L) return Promise.resolve(w.L);
   if (!loading) {
@@ -43,7 +43,7 @@ function loadLeaflet(): Promise<Leaflet> {
 }
 
 /** OpenStreetMap tiles (no key). If several tiles fail to load, switch to Esri's free street map. */
-function addBaseTiles(L: Leaflet, m: Leaflet) {
+export function addBaseTiles(L: Leaflet, m: Leaflet) {
   const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap contributors",

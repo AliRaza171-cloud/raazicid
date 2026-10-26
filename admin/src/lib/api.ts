@@ -321,6 +321,7 @@ export interface Point {
   open_requests: number;
   created_at: string;
   place_warning?: string | null;
+  place_centre?: { name: string; lat: number; lng: number } | null;
 }
 
 export interface PointRequest {

@@ -177,7 +177,8 @@ A point is open when `is_active` is true and `closes_at` (for temporary relief c
 **Coordinates check.** Create and edit refuse coordinates far from the chosen place (422 `coords_far`, e.g. Karachi
 numbers for a Hyderabad point): more than 60 km from the city centre, or 30 km from a region or area centre, or near a
 city in another province. Send `"allow_far": true` to save anyway. Every point carries `place_warning` (null, or the
-sentence explaining the mismatch), so the Points page flags pins already in the wrong place. `/locations` now returns
+sentence explaining the mismatch), so the Points page flags pins already in the wrong place, and `place_centre`
+(`{name, lat, lng}` of its area, region or city, or null) so the admin map picker opens in the right town. `/locations` now returns
 `lat` and `lng` where we have them, for the "Use the centre of …" button.
 
 ## Jobs, tracking, hand-out [Phase 4, built]
