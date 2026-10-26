@@ -12,7 +12,8 @@ strong signal). Signals:
   Rainfall vs long-term average (3 months) +100% 50 · +60% 40 (flood risk) · -60% 50 · -40% 35 (drought risk)
   AI web scan of the last 90 days          urgent 70 · high 55 · some 35 (with its source link)
 
-Data more than a year old counts 0.75, more than two years 0.5, and its reason says "(old data, 2022)".
+Data more than a year old counts 0.75, more than two years 0.5 (poverty, which changes slowly: never below 0.75),
+and its reason says "(old data, 2022)".
 
 3W (who works where, OCHA) does not change the level: it marks a place "neglected" for a category when the need
 is high or urgent and no organisation works on it there.
@@ -103,6 +104,8 @@ def score_rain(anomaly_pct: float) -> tuple[int, Optional[str]]:
     return 0, None
 
 
+# Measures that change slowly: old figures still say a lot, so they lose at most a quarter of their weight
+SLOW_CHANGING = {"poverty_headcount"}
 AI_POINTS = {3: 70, 2: 55, 1: 35}   # AI web scan alone can reach "high"; "urgent" needs a second source
 
 
@@ -189,6 +192,8 @@ def recompute(db: Session) -> int:
             continue   # who works where: not a need signal
         when = ind.period_end.strftime("%b %Y") if ind.period_end else None
         age["factor"], age["old"] = age_factor(ind.period_end)
+        if ind.indicator in SLOW_CHANGING:
+            age["factor"] = max(age["factor"], 0.75)   # poverty changes over years, not months
         if ind.indicator == "ai_need":
             if ind.period_end and (datetime.now(timezone.utc).date() - ind.period_end).days > 120:
                 continue   # AI-found news expires; run the scan again for fresh evidence
