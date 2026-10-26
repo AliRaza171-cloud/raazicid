@@ -48,7 +48,7 @@ export default function Disasters() {
 
   return (
     <>
-      <PageHeader title="Disaster alerts" sub="Found automatically from GDACS and a Claude scan of NDMA, PDMA, PMD and Pakistani news. Check each one before acting.">
+      <PageHeader title="Disaster alerts" sub="Found automatically from GDACS and an AI scan of NDMA, PDMA, PMD and Pakistani news. Check each one before acting.">
         <button className="btn ghost" onClick={() => { setParams({}); setAdding(true); }}>+ Add an alert</button>
       </PageHeader>
       <main className="page">
@@ -525,7 +525,7 @@ function Sources({ onRan }: { onRan: (msg: string) => void }) {
     <section className="card" style={{ padding: 0, overflowX: "auto" }}>
       <div style={{ padding: "16px 18px 0" }}>
         <h2 style={{ margin: 0, fontSize: 16 }}>Data sources</h2>
-        <p className="muted small" style={{ margin: "2px 0 0" }}>Checked automatically while the backend runs. "Scan news" asks Claude to search official and news sites (about 1 minute, a few cents each time).</p>
+        <p className="muted small" style={{ margin: "2px 0 0" }}>Checked automatically while the backend runs. "Scan news" asks the AI to search official and news sites (about 1 minute, a few cents each time).</p>
       </div>
       <table className="table">
         <thead><tr><th>Source</th><th>Last run</th><th>Result</th><th /></tr></thead>

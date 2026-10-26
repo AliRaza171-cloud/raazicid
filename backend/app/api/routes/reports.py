@@ -16,6 +16,7 @@ from app.db.session import get_db
 from app.models import ChunkLocation, Location, Report, ReportChunk, Source, User
 from app.models.enums import ReportStatus, Role, SourceKind
 from app.services.locations import location_path
+from app.services import llm
 from app.services.rag import embed as embedding
 from app.services.rag.finder import find_needs
 from app.services.rag.ingest import IngestError, add_report, fetch_page, fill_report, prepare
@@ -143,7 +144,8 @@ def rag_status(_: User = Depends(admin_only), db: Session = Depends(get_db)):
     total = db.scalar(select(func.count()).select_from(ReportChunk)) or 0
     with_vec = db.scalar(select(func.count()).select_from(ReportChunk).where(ReportChunk.embedding.isnot(None))) or 0
     reports = db.scalar(select(func.count()).select_from(Report).where(Report.status != ReportStatus.archived)) or 0
-    return {"embeddings": embedding.status(), "claude": bool(settings.ANTHROPIC_API_KEY), "reliefweb": bool(settings.RELIEFWEB_APPNAME),
+    return {"embeddings": embedding.status(), "claude": llm.available(), "ai": llm.available(), "ai_model": llm.label(),
+            "reliefweb": bool(settings.RELIEFWEB_APPNAME),
             "reports": reports, "chunks": total, "chunks_with_vectors": with_vec,
             "search": "hybrid (meaning + words)" if with_vec else "keyword"}
 

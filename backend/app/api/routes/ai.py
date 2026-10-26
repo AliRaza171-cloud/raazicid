@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.services import llm
 from app.core.deps import get_current_user, require_roles
 from app.core.errors import api_error
 from app.db.session import get_db
@@ -41,7 +42,8 @@ class StatusOut(BaseModel):
     version: Optional[str]
     accuracy: Optional[float]  # on the Open Images test split
     own_photo_accuracy: Optional[float]
-    document_review: bool      # ANTHROPIC_API_KEY set
+    document_review: bool      # an AI key is set (OpenAI or Claude)
+    ai_model: str = ""
 
 
 def _download(url: str) -> bytes:
@@ -65,7 +67,7 @@ def _download(url: str) -> bytes:
 
 @router.get("/ai/status", response_model=StatusOut)
 def status(_: User = Depends(get_current_user)):
-    return StatusOut(**classifier.status(), document_review=bool(settings.ANTHROPIC_API_KEY))
+    return StatusOut(**classifier.status(), document_review=llm.available(), ai_model=llm.label())
 
 
 @router.post("/ai/classify", response_model=ClassifyOut)

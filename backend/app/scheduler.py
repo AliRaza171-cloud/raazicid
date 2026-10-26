@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from app.core.config import settings
+from app.services import llm
 from app.db.session import SessionLocal
 from app.models.enums import SourceKind
 
@@ -52,7 +53,7 @@ def start():
     s.add_job(_needs_job, "interval", minutes=60, id="needs")
     if settings.RELIEFWEB_APPNAME:   # Phase 6B: reports into the library every 6 hours
         s.add_job(_job(SourceKind.reliefweb, timedelta(hours=6)), "interval", hours=6, next_run_time=now + timedelta(seconds=90), id="reliefweb")
-    if settings.WEB_SCAN_EVERY_HOURS > 0 and settings.ANTHROPIC_API_KEY:
+    if settings.WEB_SCAN_EVERY_HOURS > 0 and llm.available():
         every = timedelta(hours=settings.WEB_SCAN_EVERY_HOURS)
         s.add_job(_job(SourceKind.web_search, every), "interval", hours=settings.WEB_SCAN_EVERY_HOURS, id="webscan")
     s.start()

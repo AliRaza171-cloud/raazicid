@@ -17,7 +17,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models import Category, Location, NeedIndicator, NeedLevel
-from app.services.claude import ClaudeError, ask_complete, extract_json, search_results, text_and_citations
+from app.services import llm
+from app.services.claude import extract_json
 from app.services.gazetteer import find_places, load_places
 from app.services.locations import descendant_ids, location_path
 from app.services.needs import LEVEL_NAMES
@@ -71,6 +72,9 @@ CITE_TAG = re.compile(r"<cite\b[^>]*>(.*?)</cite>", re.S | re.I)
 def tidy(text: str) -> str:
     """Plain text: web-search <cite> tags become a [Web] marker, other markup is removed, spaces tidied."""
     text = CITE_TAG.sub(lambda m: m.group(1) + "\x00", str(text or ""))
+    # OpenAI writes web sources inline as markdown links: "... ([dawn.com](https://www.dawn.com/...))"
+    text = re.sub(r"\s*\(\[[^\]]*\]\(https?://[^)\s]+\)\)", "\x00", text)
+    text = re.sub(r"\[([^\]]+)\]\(https?://[^)\s]+\)", lambda m: m.group(1) + "\x00", text)
     text = re.sub(r"\x00(?=\s*[a-z0-9(%])", "", text)              # mid-sentence: the marker waits for the clause end
     text = text.replace("\x00", " [Web]")
     text = re.sub(r"</?[a-zA-Z][^>]*>", "", text)
@@ -253,29 +257,24 @@ def find_needs(db: Session, question: str, location_id: Optional[uuid.UUID] = No
                 "date": h.published_at.isoformat() if h.published_at else None, "text": h.text, "places": h.places,
                 "found_by": h.how} for i, h in enumerate(hits, start=1)]
     base = {"question": question, "place": place, "category": cat_name, "sources": sources,
-            "facts": facts, "web_results": [], "used_web": False, "web_mode": web, "model": settings.CLAUDE_MODEL,
+            "facts": facts, "web_results": [], "used_web": False, "web_mode": web, "model": llm.label(),
             "reliefweb_checked": reliefweb.enabled(), "reliefweb_found": from_reliefweb}
 
-    if not settings.ANTHROPIC_API_KEY:
-        msg = "Claude is not set up (add ANTHROPIC_API_KEY), so here are the most relevant passages and our need levels."
+    if not llm.available():
+        msg = f"{llm.not_set_up()} Meanwhile, here are the most relevant passages and our need levels."
         return {**base, "answer": msg, "summary": msg, "points": [], "note": "", "areas": [], "confidence": "low", "ai": False}
 
     web_search = use_web(web, hits)
     base["web_mode"] = web
-    tools = None
-    if web_search:
-        tool: dict[str, Any] = {"type": "web_search_20250305", "name": "web_search", "max_uses": WEB_SEARCHES}
-        if WEB_DOMAINS:
-            tool["allowed_domains"] = WEB_DOMAINS
-        tools = [tool]
     try:
-        res = ask_complete([{"role": "user", "content": build_prompt(question, place, cat_name, hits, facts, web_search)}],
-                  system=SYSTEM, tools=tools, max_tokens=2000, timeout=150)
-    except ClaudeError as e:
-        msg = f"Claude could not answer just now ({e}). The passages and need levels below are still useful."
+        res = llm.complete(build_prompt(question, place, cat_name, hits, facts, web_search), system=SYSTEM,
+                           web={"max_uses": WEB_SEARCHES, "allowed_domains": WEB_DOMAINS} if web_search else None,
+                           max_tokens=2000, timeout=150)
+    except llm.LLMError as e:
+        msg = f"The AI could not answer just now ({e}). The passages and need levels below are still useful."
         return {**base, "answer": msg, "summary": msg, "points": [], "note": "", "areas": [], "confidence": "low", "ai": False}
 
-    text, cites = text_and_citations(res)
+    text, cites = res.text, res.citations
     try:
         data = extract_json(CITE_TAG.sub(lambda m: m.group(1), text))
         if not isinstance(data, dict):
@@ -302,6 +301,6 @@ def find_needs(db: Session, question: str, location_id: Optional[uuid.UUID] = No
             "note": note,
             "areas": match_areas(db, areas, category_id),
             "confidence": data.get("confidence") if data.get("confidence") in ("low", "medium", "high") else "medium",
-            "web_results": web_list(cites, search_results(res)),
+            "web_results": web_list(cites, res.searched),
             "used_web": bool(web_search),
             "ai": True}

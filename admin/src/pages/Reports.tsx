@@ -86,8 +86,9 @@ export default function Reports() {
             )}
           </div>
           <div className="card">
-            <div className="kpi-label">Claude answers</div>
-            <div style={{ marginTop: 8 }}>{status ? <span className={`chip ${status.claude ? "ok" : "bad"}`}>{status.claude ? "Ready" : "Add ANTHROPIC_API_KEY"}</span> : null}</div>
+            <div className="kpi-label">AI answers</div>
+            <div style={{ marginTop: 8 }}>{status ? <span className={`chip ${status.ai ? "ok" : "bad"}`}>{status.ai ? "Ready" : "Add an AI key"}</span> : null}</div>
+            <div className="muted small" style={{ marginTop: 4 }}>{status?.ai_model}</div>
           </div>
           <div className="card">
             <div className="kpi-label">ReliefWeb</div>

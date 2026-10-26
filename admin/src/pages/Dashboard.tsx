@@ -100,7 +100,7 @@ export default function Dashboard() {
             </div>
             <div>
               <div className="kpi-label">AI document check</div>
-              <div style={{ marginTop: 6 }}>{ai === null ? <span className="chip wait">Checking</span> : ai.document_review ? <span className="chip ok">Ready</span> : <span className="chip warn">Add ANTHROPIC_API_KEY</span>}</div>
+              <div style={{ marginTop: 6 }}>{ai === null ? <span className="chip wait">Checking</span> : ai.document_review ? <span className="chip ok">Ready</span> : <span className="chip warn">Add an AI key (OPENAI_API_KEY)</span>}</div>
             </div>
           </div>
         </section>

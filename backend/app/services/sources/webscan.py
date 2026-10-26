@@ -1,4 +1,4 @@
-"""Claude web scan: Claude searches official sources and major Pakistani news for disasters in the last 72 hours.
+"""AI web scan (OpenAI or Claude, see services/llm.py): the AI searches official sources and major Pakistani news for disasters in the last 72 hours.
 
 New events become *unconfirmed* alerts with their source links; an admin checks and confirms them.
 Each scan uses up to 5 web searches ($10 per 1,000 searches) plus tokens: a few cents per scan.
@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session
 
 from app.models import DisasterAlert, Location, Report
 from app.models.enums import AlertSeverity, AlertStatus, AlertType, SourceKind
-from app.services.claude import ask_complete, extract_json, text_and_citations
+from app.services import llm
+from app.services.claude import extract_json
 from app.services.gazetteer import find_places, load_places
 
 DOMAINS = ["ndma.gov.pk", "pmd.gov.pk", "reliefweb.int", "gdacs.org", "dawn.com", "tribune.com.pk",
@@ -42,14 +43,8 @@ If nothing qualifies, reply {{"events": []}}."""
 
 def scan() -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     today = datetime.now(timezone.utc).strftime("%d %B %Y")
-    res = ask_complete(
-        [{"role": "user", "content": PROMPT.format(today=today)}],
-        # No user_location: the web search tool does not accept Pakistan (PK) as a country.
-        # The prompt and the Pakistani domain list keep the search on Pakistan.
-        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 5, "allowed_domains": DOMAINS}],
-        max_tokens=3000, timeout=180,
-    )
-    text, cites = text_and_citations(res)
+    res = llm.complete(PROMPT.format(today=today), web={"max_uses": 5, "allowed_domains": DOMAINS}, max_tokens=3000, timeout=180)
+    text, cites = res.text, res.citations
     return parse(text), cites
 
 

@@ -5,6 +5,7 @@ import uuid
 
 from app.core.config import settings
 from app.models import User
+from app.services import llm
 from app.services.rag import finder
 from app.services.rag.search import search
 from tests.test_auth_api import API, auth, register
@@ -47,8 +48,10 @@ def test_library_search_and_need_finder(client, db, monkeypatch):
     fixed = client.put(f"{API}/admin/chunks/{chunk['id']}/places", headers=admin_h, json={"location_ids": [area(db, "Lyari")]}).json()
     assert [p["name"] for p in fixed["places"]] == ["Lyari"] and fixed["places"][0]["confirmed"]
 
-    # Need finder without Claude: passages and need levels only
+    # Need finder without an AI key: passages and need levels only
     monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "")
+    monkeypatch.setattr(settings, "AI_PROVIDER", "")
     out = client.post(f"{API}/admin/need-finder/ask", headers=admin_h, json={"question": "Where are blankets needed in Karachi?", "category_id": 4}).json()
     assert out["ai"] is False and out["sources"] and out["sources"][0]["id"] == "S1"
 
@@ -56,20 +59,20 @@ def test_library_search_and_need_finder(client, db, monkeypatch):
     monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "test-key")
     sent = {}
 
-    def fake_ask(messages, **kw):
-        sent["prompt"] = messages[0]["content"]
-        sent["tools"] = kw.get("tools")
-        return {"content": [{"type": "text", "text": '```json\n{"answer": "Lyari needs blankets [S1].", "areas": [{"name": "Lyari", '
-                                                     '"need": "urgent", "categories": ["Blankets"], "reason": "Families sleep without blankets [S1].", '
-                                                     '"sources": ["S1"]}], "confidence": "medium"}\n```'}]}
+    def fake_complete(prompt, **kw):
+        sent["prompt"] = prompt
+        sent["web"] = kw.get("web")
+        return llm.Answer(text='```json\n{"summary": "Lyari needs blankets [S1].", "areas": [{"name": "Lyari", '
+                               '"need": "urgent", "categories": ["Blankets"], "reason": "Families sleep without blankets [S1].", '
+                               '"sources": ["S1"]}], "confidence": "medium"}\n```')
 
-    monkeypatch.setattr(finder, "ask_complete", fake_ask)
+    monkeypatch.setattr(finder.llm, "complete", fake_complete)
     out = client.post(f"{API}/admin/need-finder/ask", headers=admin_h,
                       json={"question": "Where are blankets needed in Karachi?", "location_id": area(db, "Karachi"), "category_id": 4,
                             "web_search": True}).json()
     assert out["ai"] and out["answer"] == "Lyari needs blankets [S1]." and out["sources"][0]["cited"]
     assert out["areas"][0]["path"][-1] == "Lyari" and out["areas"][0]["location_id"] == area(db, "Lyari")
-    assert "[S1]" in sent["prompt"] and "Focus on: Sindh › Karachi" in sent["prompt"] and sent["tools"][0]["type"] == "web_search_20250305"
+    assert "[S1]" in sent["prompt"] and "Focus on: Sindh › Karachi" in sent["prompt"] and sent["web"]["max_uses"] == 4
 
     # Archive: the need finder stops using it
     assert client.post(f"{API}/admin/reports/{rep['id']}/archive", headers=admin_h).json()["status"] == "archived"

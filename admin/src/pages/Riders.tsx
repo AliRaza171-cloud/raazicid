@@ -314,7 +314,7 @@ function RiderPanel({ id, onClose, onDecided }: { id: string; onClose: () => voi
                 <span className="muted small">{r.ai_review.model} · {date(r.ai_review.created_at)} · advisory only, you decide</span>
               </>
             ) : (
-              <span className="muted small">Claude reads the 4 photos and checks name, vehicle number and signs of editing. You still make the decision.</span>
+              <span className="muted small">The AI reads the 4 photos and checks name, vehicle number and signs of editing. You still make the decision.</span>
             )}
           </section>
 

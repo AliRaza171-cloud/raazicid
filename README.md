@@ -113,7 +113,9 @@ Everything works without these; the AI parts switch on when they are set up.
   pip install -r requirements.txt
   pip install torch --index-url https://download.pytorch.org/whl/cpu
   ```
-- **AI document check:** add `ANTHROPIC_API_KEY=` (from console.anthropic.com) to `backend/.env`.
+- **AI (document check, news scan, need finder):** OpenAI or Claude. In `backend/.env` set either
+  `AI_PROVIDER=openai` and `OPENAI_API_KEY=` (platform.openai.com; model in `OPENAI_MODEL`, default `gpt-5.5`), or
+  `AI_PROVIDER=claude` and `ANTHROPIC_API_KEY=` (console.anthropic.com). Restart the backend after changing it.
 
 Restart the backend. The admin Dashboard's **AI** card shows what is ready.
 

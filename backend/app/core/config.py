@@ -31,7 +31,10 @@ class Settings(BaseSettings):
 
     # Photo classifier (Phase 5): folder with raazicid_classifier.pt + labels.json from ml/train_classifier.ipynb
     CLASSIFIER_DIR: str = "models"
-    # Claude model for rider document review (Phase 5) and RAG answers (Phase 6)
+    # AI for rider document review, the disaster news scan and the need finder: "openai" or "claude"
+    AI_PROVIDER: str = ""                  # empty = Claude if ANTHROPIC_API_KEY is set, else OpenAI
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-5.5"          # needs web search and image input
     CLAUDE_MODEL: str = "claude-sonnet-5-5"
 
     # Phase 6: automatic data fetching

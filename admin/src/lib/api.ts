@@ -177,6 +177,7 @@ export interface AiStatus {
   accuracy: number | null;
   own_photo_accuracy: number | null;
   document_review: boolean;
+  ai_model?: string;     // e.g. "OpenAI gpt-5.5"
 }
 
 export interface AiStats {
@@ -443,7 +444,9 @@ export interface ReportDetail extends ReportItem {
 
 export interface RagStatus {
   embeddings: { available: boolean; model: string; note: string };
-  claude: boolean;
+  claude: boolean;       // older name for "ai"
+  ai: boolean;
+  ai_model: string;      // e.g. "OpenAI gpt-5.5"
   reliefweb: boolean;
   reports: number;
   chunks: number;
