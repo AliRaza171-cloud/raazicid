@@ -24,31 +24,54 @@ SLUGS = ["food", "grocery_ration", "clothes", "blankets", "winter_support", "hyg
 LEVELS = {"urgent": 3, "high": 2, "some": 1}
 MAX_AGE_DAYS = 120   # a little more than the 90 asked for: reports are often dated a few days late
 
-PROMPT = """Today is {today}. Search the web for reports from the last 90 days about what people need in {scope}.
-Prefer UN agencies (UNICEF, WFP, WHO, UNHCR, OCHA, UNDP, IOM, FAO), NDMA / PDMA, NGOs and major Pakistani news.
+CATEGORY_TEXT = {
+    "food": "food (cooked meals)", "grocery_ration": "grocery_ration (flour, rice, oil)", "clothes": "clothes",
+    "blankets": "blankets", "winter_support": "winter_support (warm clothes, heaters)",
+    "hygiene": "hygiene (soap, sanitary items, hygiene kits)", "baby": "baby (milk, nappies)",
+    "household": "household (utensils, mattresses, tents)", "school_supplies": "school_supplies", "books": "books",
+    "mobility_aids": "mobility_aids (wheelchairs)", "emergency_relief": "emergency_relief (after floods, earthquakes, displacement)",
+}
+# Three searches per scan, one per theme, so one big report cannot fill the whole answer
+THEMES = [
+    ("food, hunger and rations", ["food", "grocery_ration", "baby"],
+     "WFP, FAO, IPC, UNICEF nutrition, food prices, drought, malnutrition"),
+    ("shelter, winter and disaster relief", ["blankets", "winter_support", "clothes", "household", "emergency_relief"],
+     "NDMA / PDMA, OCHA, IOM, UNHCR, floods, cold waves, displaced and refugee families"),
+    ("health, hygiene and education", ["hygiene", "baby", "school_supplies", "books", "mobility_aids"],
+     "UNICEF, WHO, UNFPA, UNESCO, out-of-school children, textbooks, sanitation, disability"),
+]
+PER_SOURCE = 2   # at most this many findings from any one page
 
-RAAZICID is a charity that collects and hands out goods. Only these needs count:
-food (cooked meals), grocery_ration (flour, rice, oil), clothes, blankets, winter_support (warm clothes, heaters),
-hygiene (soap, sanitary items, hygiene kits), baby (milk, nappies), household (utensils, mattresses, tents),
-school_supplies, books, mobility_aids (wheelchairs), emergency_relief (after floods, earthquakes, displacement).
+PROMPT = """Today is {today}. Search the web for reports from the last 90 days about {theme} needs in {scope}.
+Good places to look: {hint}, NGOs and major Pakistani news. Use several different sources.
+
+RAAZICID is a charity that collects and hands out goods. Only these needs count here:
+{categories}.
 
 Reply with JSON only, inside ```json fences:
 {{"needs": [{{
   "area": "district or city in Pakistan",
   "province": "province",
-  "categories": ["hygiene", "baby"],
+  "categories": ["{example}"],
   "level": "urgent | high | some",
   "why": "one plain sentence with the numbers the source gives",
   "date": "YYYY-MM-DD (date of the source)",
   "sources": [{{"url": "https://...", "title": "..."}}]
 }}]}}
-Rules: only needs stated in sources from the last 90 days; name a district or city whenever the source does; never guess
-numbers or places; at most 15 items, most serious first. If nothing qualifies, reply {{"needs": []}}."""
+Rules:
+- Only needs stated in sources from the last 90 days. Never guess numbers or places.
+- Aid already delivered (for example "NDMA distributed 5,000 food packs") is NOT a need by itself. Only list it when
+  the source says more is needed, stocks ran out, or families are still waiting.
+- At most {per_source} items from the same source; use different sources for different areas.
+- "urgent": the source says many people lack it now. "high": a clear, large shortage. "some": a smaller or partial gap.
+- Name a district or city whenever the source does. At most 8 items, most serious first.
+If nothing qualifies, reply {{"needs": []}}."""
 
 
-def parse(text: str, today: Optional[date] = None) -> list[dict[str, Any]]:
+def parse(text: str, today: Optional[date] = None, allowed: Optional[list[str]] = None) -> list[dict[str, Any]]:
     """Clean items from the AI's JSON: known categories only, recent dates only, real links only."""
     today = today or datetime.now(timezone.utc).date()
+    allowed = allowed or SLUGS
     try:
         data = extract_json(text)
     except ValueError:
@@ -57,7 +80,7 @@ def parse(text: str, today: Optional[date] = None) -> list[dict[str, Any]]:
     for n in (data.get("needs") or []) if isinstance(data, dict) else []:
         if not isinstance(n, dict) or not str(n.get("area") or "").strip():
             continue
-        cats = [c for c in dict.fromkeys(str(c).strip().lower() for c in n.get("categories") or []) if c in SLUGS]
+        cats = [c for c in dict.fromkeys(str(c).strip().lower() for c in n.get("categories") or []) if c in allowed]
         if not cats:
             continue
         try:
@@ -76,17 +99,62 @@ def parse(text: str, today: Optional[date] = None) -> list[dict[str, Any]]:
     return out[:15]
 
 
-def scan(scope: str) -> list[dict[str, Any]]:
-    """Ask the AI (with web search). Slow: up to a few minutes."""
-    today = datetime.now(timezone.utc)
-    res = llm.complete(PROMPT.format(today=today.strftime("%d %B %Y"), scope=scope),
-                       web={"max_uses": 6, "allowed_domains": None}, max_tokens=3000, timeout=240)
-    items = parse(res.text, today.date())
+def _page(url: str) -> str:
+    return url.split("#")[0].split("?")[0].rstrip("/").lower()
+
+
+def combine(groups: list[list[dict[str, Any]]], per_source: int = PER_SOURCE) -> list[dict[str, Any]]:
+    """Merge the theme searches: at most `per_source` findings per page, and one finding per area and category
+    (the most serious, then the newest)."""
+    pool = [it for g in groups for it in g]
+    pool.sort(key=lambda it: (-it["level"], -it["date"].toordinal()))
+    used: dict[str, int] = {}
+    seen: set[tuple[str, str]] = set()
+    out = []
+    for it in pool:
+        page = _page(it["sources"][0]["url"]) if it["sources"] else ""
+        if page and used.get(page, 0) >= per_source:
+            continue
+        cats = [c for c in it["categories"] if (it["area"].lower(), c) not in seen]
+        if not cats:
+            continue
+        seen.update((it["area"].lower(), c) for c in cats)
+        if page:
+            used[page] = used.get(page, 0) + 1
+        out.append({**it, "categories": cats})
+    return out
+
+
+def _scan_theme(scope: str, theme: tuple[str, list[str], str], today: datetime) -> list[dict[str, Any]]:
+    name, cats, hint = theme
+    prompt = PROMPT.format(today=today.strftime("%d %B %Y"), theme=name, scope=scope, hint=hint, per_source=PER_SOURCE,
+                           categories=", ".join(CATEGORY_TEXT[c] for c in cats), example=cats[0])
+    res = llm.complete(prompt, web={"max_uses": 4, "allowed_domains": None}, max_tokens=2500, timeout=240)
+    items = parse(res.text, today.date(), allowed=cats)
     if res.citations:   # items without their own links get the pages the AI quoted
         for it in items:
             if not it["sources"]:
-                it["sources"] = [{"url": c["url"], "title": c["title"]} for c in res.citations[:2]]
+                it["sources"] = [{"url": c["url"], "title": c["title"]} for c in res.citations[:1]]
     return items
+
+
+def scan(scope: str) -> list[dict[str, Any]]:
+    """Three theme searches at the same time (food; shelter and winter; health, hygiene and education).
+    A theme that fails is skipped; if all fail, the error is raised. Up to a few minutes."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    today = datetime.now(timezone.utc)
+    groups, errors = [], []
+    with ThreadPoolExecutor(max_workers=len(THEMES)) as pool:
+        futures = [pool.submit(_scan_theme, scope, t, today) for t in THEMES]
+        for f in futures:
+            try:
+                groups.append(f.result())
+            except llm.LLMError as e:
+                errors.append(str(e))
+    if not groups and errors:
+        raise llm.LLMError(errors[0])
+    return combine(groups)
 
 
 def sync(db: Session, items: list[dict[str, Any]], source_id: int, province_id: Optional[uuid.UUID] = None) -> str:
@@ -112,7 +180,8 @@ def sync(db: Session, items: list[dict[str, Any]], source_id: int, province_id: 
         added += 1
     db.commit()
     where = "" if not skipped else f" ({skipped} not matched to our places)"
-    return f"{len(items)} needs found, {added} added{where} · {llm.label()}"
+    sources = len({_page(it["sources"][0]["url"]) for it in items if it["sources"]})
+    return f"{len(items)} needs found from {sources} sources, {added} added{where} · {llm.label()}"
 
 
 def run(db: Session, source_id: int, province_id: Optional[uuid.UUID] = None) -> str:

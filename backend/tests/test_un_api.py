@@ -68,7 +68,7 @@ def test_ai_scan_adds_fresh_linked_needs(client, db, monkeypatch):
               "sources": []}]
     monkeypatch.setattr(ai_needs, "scan", lambda scope: items)
     ok, status = run_source(db, SourceKind.ai_needs, {"province_id": uuid.UUID(sindh)})
-    assert ok and "2 needs found, 1 added" in status and "not matched" in status   # Lahore is not in Sindh
+    assert ok and "2 needs found" in status and "1 added" in status and "not matched" in status   # Lahore is not in Sindh
     try:
         donor_h = auth(register(client).json()["access_token"])
         south = client.get(f"{API}/needs", headers=donor_h, params={"parent_id": area(db, "Karachi")}).json()

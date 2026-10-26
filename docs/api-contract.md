@@ -282,9 +282,11 @@ A place shows the highest level found anywhere inside it.
 **Fresh data.** UN datasets are published every year or two, so two things keep the levels current:
 - *Age weighting:* data more than a year old counts 0.75, more than two years 0.5, and its reason ends with
   "(old data, 2022)".
-- *AI web scan* (`/admin/needs/ai-scan`, or `AI_NEEDS_EVERY_DAYS`): the AI (OpenAI or Claude) searches news, UN and
-  NGO reports from the last 90 days for one province (or all Pakistan) and returns needs per district with source
-  links: urgent 70, high 55, some 35. A scan replaces the previous one for that province; findings expire after 120 days.
+- *AI web scan* (`/admin/needs/ai-scan`, or `AI_NEEDS_EVERY_DAYS`): the AI (OpenAI or Claude) runs three searches at
+  once (food and rations; shelter, winter and relief; health, hygiene and education) over news, UN and NGO reports
+  from the last 90 days for one province (or all Pakistan), and returns needs per district with source links:
+  urgent 70, high 55, some 35. At most 2 findings come from any one page, and aid already delivered only counts when
+  the source says gaps remain. A scan replaces the previous one for that province; findings expire after 120 days.
 
 ```json
 // GET /needs?parent_id=<sindh-id>

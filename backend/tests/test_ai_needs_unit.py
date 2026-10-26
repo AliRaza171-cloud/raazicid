@@ -3,7 +3,7 @@
 from datetime import date
 
 from app.services.needs import age_factor, score_ai
-from app.services.sources.ai_needs import parse
+from app.services.sources.ai_needs import combine, parse
 
 TODAY = date(2026, 10, 25)
 
@@ -41,3 +41,26 @@ def test_old_data_counts_less():
 
 def test_ai_points():
     assert score_ai(3) == 70 and score_ai(2) == 55 and score_ai(1) == 35 and score_ai(0) == 0
+
+
+def _item(area, cats, level, url, day=20):
+    return {"area": area, "province": "Punjab", "categories": cats, "level": level, "why": "x", "date": date(2026, 10, day),
+            "sources": [{"url": url, "title": "t"}] if url else []}
+
+
+def test_one_source_cannot_fill_the_scan():
+    sitrep = "https://sitreps.ndma.gov.pk/province-dark/1"
+    food = [_item("Sheikhupura", ["food"], 3, sitrep), _item("Muzaffargarh", ["food"], 2, sitrep + "?x=1"),
+            _item("Jhang", ["food"], 2, sitrep + "/")]
+    other = [_item("Rajanpur", ["blankets"], 2, "https://www.unicef.org/pakistan/a"),
+             _item("Sheikhupura", ["food", "hygiene"], 1, "https://www.dawn.com/news/2", day=22)]
+    out = combine([food, other], per_source=2)
+    areas = [(i["area"], i["categories"]) for i in out]
+    assert ("Jhang", ["food"]) not in areas                         # third item from the same sitrep page dropped
+    assert ("Sheikhupura", ["food"]) in areas and ("Rajanpur", ["blankets"]) in areas
+    assert ("Sheikhupura", ["hygiene"]) in areas                    # food already covered there: only the new category kept
+
+
+def test_theme_only_keeps_its_categories():
+    text = '{"needs": [{"area": "Swat", "categories": ["blankets", "food"], "level": "high", "date": "2026-10-20"}]}'
+    assert parse(text, TODAY, allowed=["blankets", "winter_support"])[0]["categories"] == ["blankets"]
