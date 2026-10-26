@@ -90,8 +90,9 @@ Rules:
 If nothing qualifies, reply {{"needs": []}}."""
 
 
-def parse(text: str, today: Optional[date] = None, allowed: Optional[list[str]] = None) -> list[dict[str, Any]]:
-    """Clean items from the AI's JSON: known categories only, recent dates only, real links only."""
+def parse(text: str, today: Optional[date] = None, allowed: Optional[list[str]] = None,
+          max_age_days: int = MAX_AGE_DAYS, default_date: Optional[date] = None) -> list[dict[str, Any]]:
+    """Clean items from the AI's JSON: known categories only, recent dates only, real links only, a gap shown."""
     today = today or datetime.now(timezone.utc).date()
     allowed = allowed or SLUGS
     try:
@@ -108,10 +109,10 @@ def parse(text: str, today: Optional[date] = None, allowed: Optional[list[str]] 
         try:
             when = date.fromisoformat(str(n.get("date"))[:10])
         except ValueError:
-            when = today
+            when = default_date or today
         if when > today:
             when = today
-        if (today - when).days > MAX_AGE_DAYS:
+        if (today - when).days > max_age_days:
             continue   # old news: the UN datasets already cover the past
         why, unmet = str(n.get("why") or "")[:400], str(n.get("unmet") or "")[:300]
         if not shows_gap(why, unmet):
@@ -125,8 +126,10 @@ def parse(text: str, today: Optional[date] = None, allowed: Optional[list[str]] 
         level = LEVELS.get(str(n.get("level") or "").strip().lower(), 1)
         if reached == "partial" and level == 3:
             level = 2   # some help is arriving: high, not urgent
+        page = n.get("page")
         out.append({"area": str(n["area"]).strip()[:120], "province": str(n.get("province") or "").strip()[:60], "categories": cats,
-                    "level": level, "why": why, "unmet": unmet, "reached": reached, "date": when, "sources": sources})
+                    "level": level, "why": why, "unmet": unmet, "reached": reached, "date": when, "sources": sources,
+                    "page": int(page) if isinstance(page, (int, float)) or str(page).isdigit() else None})
     return out[:15]
 
 

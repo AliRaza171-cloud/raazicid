@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.deps import require_roles
 from app.core.errors import api_error
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.models import ChunkLocation, Location, Report, ReportChunk, Source, User
 from app.models.enums import ReportStatus, Role, SourceKind
 from app.services.locations import location_path
@@ -20,6 +20,7 @@ from app.services import llm
 from app.services.rag import embed as embedding
 from app.services.rag.finder import find_needs
 from app.services.rag.ingest import IngestError, add_report, fetch_page, fill_report, prepare
+from app.services.rag import report_needs
 from app.services.rag.text import pdf_pages
 
 router = APIRouter(tags=["reports"])
@@ -62,6 +63,8 @@ class ChunkOut(BaseModel):
 
 class ReportDetail(ReportItem):
     chunk_list: list[ChunkOut]
+    needs_checked_at: Optional[datetime] = None
+    findings: list[dict] = []   # unmet needs the AI read in this report
 
 
 class LinkIn(BaseModel):
@@ -118,7 +121,8 @@ def _detail(db: Session, r: Report) -> ReportDetail:
         chunks.append(ChunkOut(id=c.id, index=c.chunk_index, page=c.page, text=c.text, has_embedding=c.embedding is not None,
                                places=[TagOut(id=t.location_id, name=names.get(t.location_id, "?"), path=location_path(db, t.location_id),
                                               confidence=t.confidence, confirmed=t.confirmed_by is not None) for t in c.locations]))
-    return ReportDetail(**item.model_dump(), chunk_list=chunks)
+    return ReportDetail(**item.model_dump(), chunk_list=chunks, needs_checked_at=r.needs_checked_at,
+                        findings=report_needs.report_findings(db, r.id))
 
 
 def _get(db: Session, report_id: uuid.UUID) -> Report:
@@ -137,6 +141,19 @@ def _when(v: Optional[str]) -> Optional[datetime]:
         raise api_error(422, "bad_date", "Date should look like 2026-10-24")
 
 
+def read_in_background(report_id: uuid.UUID) -> None:
+    """After an upload or a saved link: read the new report for unmet needs and refresh the need levels."""
+    if not llm.available():
+        return
+    from app.services.needs import recompute
+    with SessionLocal() as db:
+        try:
+            report_needs.read_report(db, report_id)
+            recompute(db)
+        except Exception:   # the admin can press "Find needs in this report" again
+            db.rollback()
+
+
 # ---------- library ----------
 
 @router.get("/admin/rag/status")
@@ -146,7 +163,7 @@ def rag_status(_: User = Depends(admin_only), db: Session = Depends(get_db)):
     reports = db.scalar(select(func.count()).select_from(Report).where(Report.status != ReportStatus.archived)) or 0
     return {"embeddings": embedding.status(), "claude": llm.available(), "ai": llm.available(), "ai_model": llm.label(),
             "reliefweb": bool(settings.RELIEFWEB_APPNAME),
-            "reports": reports, "chunks": total, "chunks_with_vectors": with_vec,
+            "reports": reports, "chunks": total, "chunks_with_vectors": with_vec, "needs_waiting": report_needs.waiting(db),
             "search": "hybrid (meaning + words)" if with_vec else "keyword"}
 
 
@@ -169,8 +186,9 @@ def one_report(report_id: uuid.UUID, _: User = Depends(admin_only), db: Session 
 
 
 @router.post("/admin/reports/upload", response_model=ReportDetail, status_code=201)
-def upload(file: UploadFile = File(...), title: Optional[str] = Form(None), publisher: Optional[str] = Form(None),
-           published_at: Optional[str] = Form(None), admin: User = Depends(admin_only), db: Session = Depends(get_db)):
+def upload(background: BackgroundTasks, file: UploadFile = File(...), title: Optional[str] = Form(None),
+           publisher: Optional[str] = Form(None), published_at: Optional[str] = Form(None),
+           admin: User = Depends(admin_only), db: Session = Depends(get_db)):
     """A PDF or text file: situation reports, IPC analyses, NGO assessments, our own field notes.
     A plain (not async) function: reading a long PDF and making vectors runs in a worker thread, not blocking the API."""
     admin_id = admin.id
@@ -197,11 +215,12 @@ def upload(file: UploadFile = File(...), title: Optional[str] = Form(None), publ
         raise api_error(422, "unreadable", str(e))
     if not created:
         raise api_error(409, "duplicate", f"Already in the library: {r.title}")
+    background.add_task(read_in_background, r.id)   # the AI reads it for unmet needs after the reply
     return _detail(db, r)
 
 
 @router.post("/admin/reports/link", response_model=ReportDetail, status_code=201)
-def add_link(body: LinkIn, admin: User = Depends(admin_only), db: Session = Depends(get_db)):
+def add_link(body: LinkIn, background: BackgroundTasks, admin: User = Depends(admin_only), db: Session = Depends(get_db)):
     """Read a news article, NDMA / PDMA page or online PDF and add its text."""
     admin_id = admin.id
     db.commit()
@@ -213,6 +232,7 @@ def add_link(body: LinkIn, admin: User = Depends(admin_only), db: Session = Depe
         raise api_error(422, "unreadable", str(e))
     if not created:
         raise api_error(409, "duplicate", f"Already in the library: {r.title}")
+    background.add_task(read_in_background, r.id)
     return _detail(db, r)
 
 
@@ -262,6 +282,8 @@ def archive(report_id: uuid.UUID, _: User = Depends(admin_only), db: Session = D
     r = _get(db, report_id)
     r.status = ReportStatus.archived
     db.commit()
+    from app.services.needs import recompute
+    recompute(db)   # its unmet needs stop counting
     return _items(db, [r])[0]
 
 
@@ -270,6 +292,8 @@ def restore(report_id: uuid.UUID, _: User = Depends(admin_only), db: Session = D
     r = _get(db, report_id)
     r.status = ReportStatus.tagged if any(c.locations for c in r.chunks) else ReportStatus.needs_review
     db.commit()
+    from app.services.needs import recompute
+    recompute(db)
     return _items(db, [r])[0]
 
 
@@ -288,6 +312,34 @@ def embed_missing(_: User = Depends(admin_only), db: Session = Depends(get_db)):
         db.get(ReportChunk, cid).embedding = v
     db.commit()
     return {"done": len(rows), "note": f"Added vectors to {len(rows)} passages"}
+
+
+# ---------- report reader ----------
+
+@router.post("/admin/reports/{report_id}/find-needs", response_model=ReportDetail)
+def find_needs_in_report(report_id: uuid.UUID, _: User = Depends(admin_only), db: Session = Depends(get_db)):
+    """The AI reads this report for unmet needs (again), then the need levels are refreshed. About 20-60 seconds."""
+    if not llm.available():
+        raise api_error(422, "ai_not_set_up", llm.not_set_up())
+    _get(db, report_id)
+    try:
+        report_needs.read_report(db, report_id)
+    except llm.LLMError as e:
+        raise api_error(502, "ai_error", str(e))
+    from app.services.needs import recompute
+    recompute(db)
+    return _detail(db, _get(db, report_id))
+
+
+@router.post("/admin/rag/find-needs")
+def find_needs_in_waiting(limit: int = Query(10, ge=1, le=30), _: User = Depends(admin_only), db: Session = Depends(get_db)):
+    """Read the reports not read yet (newest first). About 30 seconds per report."""
+    if not llm.available():
+        raise api_error(422, "ai_not_set_up", llm.not_set_up())
+    status = report_needs.read_waiting(db, limit)
+    from app.services.needs import recompute
+    recompute(db)
+    return {"status": status, "waiting": report_needs.waiting(db)}
 
 
 # ---------- need finder ----------

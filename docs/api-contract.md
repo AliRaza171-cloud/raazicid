@@ -279,6 +279,12 @@ HAPI does not publish every subject for every country; the HDX source status nam
 
 A place shows the highest level found anywhere inside it.
 
+**Report reader.** Every report in the library (ReliefWeb, uploads, saved links) is read once by the AI for
+unmet needs per district: same rules as the web scan (a quote that shows the gap, who has been reached), plus the page
+number. Findings are `report_need` indicators (same points as the web scan) linked to the report; archiving a report
+removes them. New uploads and links are read in the background, ReliefWeb reports after each fetch, and anything
+left every 2 hours. Long reports are trimmed to the ~40,000 characters that talk most about needs.
+
 **Fresh data.** UN datasets are published every year or two, so two things keep the levels current:
 - *Age weighting:* data more than a year old counts 0.75, more than two years 0.5, and its reason ends with
   "(old data, 2022)".
@@ -324,6 +330,8 @@ Both create *unconfirmed* alerts with their source links; donors see an alert on
 | POST | `/admin/reports/{id}/archive` · `/restore` | admin | Stop / start using a report |
 | PUT | `/admin/chunks/{id}/places` | admin | `{"location_ids": […]}`: correct a passage's places |
 | POST | `/admin/rag/embed-missing` | admin | Add vectors to passages stored before embeddings were installed |
+| POST | `/admin/reports/{id}/find-needs` | admin | Report reader: the AI reads this report for unmet needs (again) |
+| POST | `/admin/rag/find-needs?limit=10` | admin | Read the reports not read yet, newest first |
 | POST | `/admin/need-finder/ask` | admin | RAG question (below) |
 | POST | `/admin/appeals` | admin | Send an appeal to donors in chosen provinces |
 | GET | `/admin/appeals?alert_id=` | admin | Appeals with how many donors they reached |

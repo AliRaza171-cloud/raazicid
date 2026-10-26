@@ -28,8 +28,16 @@ def _webscan(db: Session, source_id: int) -> str:
     return webscan.sync(db, events, source_id)
 
 
+def _reliefweb(db: Session, source_id: int) -> str:
+    """New ReliefWeb reports go into the library, then the AI reads them for unmet needs."""
+    from app.services import llm
+    from app.services.rag.report_needs import read_waiting
+    status = reliefweb.fetch_and_sync(db, source_id)
+    return status + ("; " + read_waiting(db, 15) if llm.available() else "")
+
+
 RUNNERS = {SourceKind.gdacs: _gdacs, SourceKind.hdx_hapi: _hdx, SourceKind.web_search: _webscan,
-           SourceKind.reliefweb: reliefweb.fetch_and_sync, SourceKind.ai_needs: ai_needs.run}
+           SourceKind.reliefweb: _reliefweb, SourceKind.ai_needs: ai_needs.run}
 NAMES = {SourceKind.ai_needs: "AI web scan for current needs"}
 
 

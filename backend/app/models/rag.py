@@ -44,6 +44,7 @@ class Report(UUIDPk, Timestamps, Base):
     content_hash: Mapped[str] = mapped_column(String(64), unique=True)  # skip duplicates
     status: Mapped[ReportStatus] = mapped_column(enum_col(ReportStatus), default=ReportStatus.new, index=True)
     uploaded_by: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("users.id"))
+    needs_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)   # read by the AI for unmet needs
 
     chunks: Mapped[list["ReportChunk"]] = relationship(back_populates="report", cascade="all, delete-orphan")
 

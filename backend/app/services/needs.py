@@ -11,6 +11,8 @@ strong signal). Signals:
   People in need (OCHA, by sector)         share >=40% 85 · >=25% 65 · >=10% 45; or 500k+ 75 · 100k+ 60 · 20k+ 40
   Rainfall vs long-term average (3 months) +100% 50 · +60% 40 (flood risk) · -60% 50 · -40% 35 (drought risk)
   AI web scan of the last 90 days          urgent 70 · high 55 · some 35 (with its source link)
+  Report reader (needs stated in library   same points, with the report title, page and quote
+  reports: ReliefWeb, uploads, links)      (+10 for both when no aid has reached the people yet)
 
 Data more than a year old counts 0.75 (poverty, which changes slowly, keeps 0.75) and its reason says
 "(old data, 2025)". Data older than NEED_DATA_MAX_YEARS (default 2) is not used at all.
@@ -28,8 +30,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models import AlertNeed, Category, DisasterAlert, DistributionPoint, Location, NeedIndicator, NeedLevel, PointRequest
-from app.models.enums import AlertSeverity, AlertStatus, AlertType, RequestStatus
+from app.models import (AlertNeed, Category, DisasterAlert, DistributionPoint, Location, NeedIndicator, NeedLevel, PointRequest,
+                        Report)
+from app.models.enums import AlertSeverity, AlertStatus, AlertType, ReportStatus, RequestStatus
 from app.services.locations import descendant_ids
 from app.services.sources.ai_needs import shows_gap
 from app.services.sources.hapi_un import category_sectors, sector_categories
@@ -196,6 +199,7 @@ def recompute(db: Session) -> int:
                 reason = {**reason, "why": f"{reason['why']} (old data, {age['old']})", "old": True}
             sig[(loc, ids[slug])].append((pts, reason))
 
+    archived = set(db.scalars(select(Report.id).where(Report.status == ReportStatus.archived)))
     for ind in db.scalars(select(NeedIndicator)):
         if ind.indicator == "orgs_present":
             continue   # who works where: not a need signal
@@ -205,6 +209,19 @@ def recompute(db: Session) -> int:
         age["factor"], age["old"] = age_factor(ind.period_end)
         if ind.indicator in SLOW_CHANGING:
             age["factor"] = max(age["factor"], 0.75)   # poverty changes over years, not months
+        if ind.indicator == "report_need":
+            meta = ind.meta or {}
+            if ind.report_id in archived or not shows_gap(meta.get("why") or "", meta.get("unmet") or ""):
+                continue
+            reached = meta.get("reached") or "unknown"
+            why = (meta.get("why") or "Reported need") + {"none": " No aid has reached them yet.",
+                                                          "partial": " Some aid has arrived, not enough."}.get(reached, "")
+            page = f", page {meta['page']}" if meta.get("page") else ""
+            r = {"why": why, "source": f"Report · {meta.get('title') or 'report'}{page}"[:160], "quote": meta.get("unmet") or None,
+                 "date": ind.period_end.strftime("%d %b %Y") if ind.period_end else None, "url": meta.get("url"),
+                 "report_id": str(ind.report_id) if ind.report_id else None, "reached": reached}
+            add(ind.location_id, ids_to_slug.get(ind.category_id, ""), score_ai(ind.value) + (10 if reached == "none" else 0), r)
+            continue
         if ind.indicator == "ai_need":
             if ind.period_end and (datetime.now(timezone.utc).date() - ind.period_end).days > 120:
                 continue   # AI-found news expires; run the scan again for fresh evidence

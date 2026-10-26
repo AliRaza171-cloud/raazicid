@@ -32,6 +32,17 @@ def _job(kind: SourceKind, every: timedelta):
     return run
 
 
+def _report_reader_job():
+    """Every 2 hours: the AI reads up to 10 library reports it has not read yet, then refreshes need levels."""
+    from app.services.needs import recompute
+    from app.services.rag.report_needs import read_waiting, waiting
+    with SessionLocal() as db:
+        if not waiting(db):
+            return
+        log.info("report reader: %s", read_waiting(db, 10))
+        recompute(db)
+
+
 def _needs_job():
     from app.services.needs import recompute
     with SessionLocal() as db:
@@ -53,6 +64,8 @@ def start():
     s.add_job(_needs_job, "interval", minutes=60, id="needs")
     if settings.RELIEFWEB_APPNAME:   # Phase 6B: reports into the library every 6 hours
         s.add_job(_job(SourceKind.reliefweb, timedelta(hours=6)), "interval", hours=6, next_run_time=now + timedelta(seconds=90), id="reliefweb")
+    if llm.available():
+        s.add_job(_report_reader_job, "interval", hours=2, next_run_time=now + timedelta(minutes=3), id="report_reader")
     if settings.AI_NEEDS_EVERY_DAYS > 0 and llm.available():   # AI web scan for current needs (all Pakistan)
         every = timedelta(days=settings.AI_NEEDS_EVERY_DAYS)
         s.add_job(_job(SourceKind.ai_needs, every), "interval", days=settings.AI_NEEDS_EVERY_DAYS, id="ai_needs")

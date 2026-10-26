@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/Layout";
 import LocationSelect from "../components/LocationSelect";
-import { api, type ChunkTag, type RagStatus, type ReportChunk, type ReportDetail, type ReportItem } from "../lib/api";
+import { api, type ChunkTag, type RagStatus, type ReportChunk, type ReportDetail, type ReportFinding, type ReportItem } from "../lib/api";
+import { LEVELS } from "../lib/format";
 import { date } from "../lib/format";
 
 const STATUS: Record<string, { label: string; chip: string }> = {
@@ -25,7 +27,9 @@ export default function Reports() {
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
   const [adding, setAdding] = useState<"file" | "link" | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [params] = useSearchParams();
+  const [selected, setSelected] = useState<string | null>(params.get("id"));   // opened from a reason on Needs by area
+  const [reading, setReading] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -59,6 +63,19 @@ export default function Reports() {
     }
   };
 
+  const readWaiting = async () => {
+    setReading(true);
+    setError(null);
+    try {
+      const r = await api<{ status: string; waiting: number }>("/admin/rag/find-needs?limit=10", { method: "POST" });
+      say(r.status);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setReading(false);
+    }
+  };
+
   const shown = (reports ?? []).filter((r) => filter !== "links" || !r.has_text);
   const missingVectors = status ? status.chunks - status.chunks_with_vectors : 0;
 
@@ -89,6 +106,16 @@ export default function Reports() {
             <div className="kpi-label">AI answers</div>
             <div style={{ marginTop: 8 }}>{status ? <span className={`chip ${status.ai ? "ok" : "bad"}`}>{status.ai ? "Ready" : "Add an AI key"}</span> : null}</div>
             <div className="muted small" style={{ marginTop: 4 }}>{status?.ai_model}</div>
+          </div>
+          <div className="card">
+            <div className="kpi-label">Read for unmet needs</div>
+            <div style={{ fontSize: 18, fontWeight: 800, marginTop: 6 }}>{status ? (status.needs_waiting ? `${status.needs_waiting} waiting` : "All read") : "–"}</div>
+            <div className="muted small">The AI reads each report once; what it finds feeds Needs by area.</div>
+            {status && status.ai && status.needs_waiting > 0 && (
+              <button className="btn ghost small" style={{ marginTop: 8 }} disabled={reading} onClick={readWaiting}>
+                {reading ? "Reading… (about 30 s a report)" : `Read ${Math.min(status.needs_waiting, 10)} now`}
+              </button>
+            )}
           </div>
           <div className="card">
             <div className="kpi-label">ReliefWeb</div>
@@ -287,6 +314,7 @@ function ReportPanel({ id, onClose, onChanged }: { id: string; onClose: () => vo
           <button className="btn danger small" disabled={busy} onClick={() => act("archive", "Archived: the need finder will not use it")}>Archive (out of date)</button>
         )}
       </div>
+      {r.has_text && <Findings r={r} onRead={(d) => { setR(d); onChanged("Read for unmet needs"); }} />}
       {!r.has_text ? (
         <p className="muted" style={{ margin: 0 }}>Only the link is saved (from the news scan or GDACS). Read the article text so the need finder can use it.</p>
       ) : (
@@ -346,5 +374,52 @@ function Passage({ c, onSaved }: { c: ReportChunk; onSaved: (c: ReportChunk) => 
       )}
       {error && <div className="flash bad" role="alert">{error}</div>}
     </div>
+  );
+}
+
+function Findings({ r, onRead }: { r: ReportDetail; onRead: (d: ReportDetail) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const read = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      onRead(await api<ReportDetail>(`/admin/reports/${r.id}/find-needs`, { method: "POST" }));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const row = (f: ReportFinding, i: number) => (
+    <div key={i} style={{ display: "flex", flexDirection: "column", gap: 2, padding: "8px 0", borderTop: i ? "1px solid var(--line)" : undefined }}>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <span className={`chip lv${f.level}`}>{LEVELS[f.level]?.label}</span>
+        <strong>{f.category}</strong><span>in {f.area}</span>
+        {f.reached === "none" && <span className="chip bad">Nobody reached yet</span>}
+        {f.page && <span className="muted small">page {f.page}</span>}
+      </div>
+      <div className="small">{f.why}</div>
+      {f.unmet && <div className="small" style={{ fontStyle: "italic", color: "var(--ink-2)" }}>“{f.unmet}”</div>}
+    </div>
+  );
+
+  return (
+    <section style={{ background: "#fafbf9", border: "1px solid var(--line)", borderRadius: 12, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <strong style={{ marginRight: "auto" }}>Unmet needs in this report</strong>
+        <button className="btn ghost small" disabled={busy} onClick={read}>{busy ? "Reading…" : r.needs_checked_at ? "Read again" : "Find needs in this report"}</button>
+      </div>
+      {!r.needs_checked_at ? (
+        <span className="muted small">Not read yet. New reports are read automatically when the AI is set up.</span>
+      ) : r.findings.length === 0 ? (
+        <span className="muted small">The AI found no unmet needs (only aid delivered, or no places named).</span>
+      ) : (
+        <div>{r.findings.map(row)}</div>
+      )}
+      {error && <div className="flash bad" role="alert">{error}</div>}
+    </section>
   );
 }

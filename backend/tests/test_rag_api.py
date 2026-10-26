@@ -121,3 +121,42 @@ def test_appeal_reaches_donors_in_the_province(client, db):
     assert everyone["provinces"] == ["All Pakistan"]
     assert any(a["id"] == everyone["id"] for a in client.get(f"{API}/appeals/active", headers=punjab_h).json())
     client.post(f"{API}/admin/appeals/{everyone['id']}/end", headers=admin_h)
+
+
+def test_report_reader_feeds_needs_by_area(client, db, monkeypatch):
+    from app.api.routes import reports as reports_routes
+    from app.services.rag import report_needs
+
+    monkeypatch.setattr(reports_routes, "read_in_background", lambda report_id: None)   # read on demand below instead
+    monkeypatch.setattr(settings, "AI_PROVIDER", "claude")
+    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "test-key")
+    admin_h = admin_headers(client, db)
+    text = ("Rapid needs assessment, Karachi South.\n" + "Women in Lyari say hygiene kits ran out last month and no agency has come since. " * 10)
+    rep = upload(client, admin_h, text=text, name="lyari-assessment.txt", publisher="Field NGO", published_at="2026-10-01").json()
+    assert client.get(f"{API}/admin/rag/status", headers=admin_h).json()["needs_waiting"] >= 1
+
+    def fake_complete(prompt, **kw):
+        assert "Rapid needs assessment" in prompt and kw.get("web") is None   # reads the report, no web search
+        return llm.Answer(text='```json\n{"needs": [{"area": "Lyari", "province": "Sindh", "categories": ["hygiene"], "level": "urgent",'
+                               ' "why": "Women in Lyari have no hygiene kits.", "unmet": "hygiene kits ran out last month", "reached": "none",'
+                               ' "page": 1}, {"area": "Lyari", "province": "Sindh", "categories": ["food"], "level": "high",'
+                               ' "why": "An NGO distributed 500 food packs.", "unmet": ""}]}\n```')
+
+    monkeypatch.setattr(report_needs.llm, "complete", fake_complete)
+    r = client.post(f"{API}/admin/reports/{rep['id']}/find-needs", headers=admin_h)
+    assert r.status_code == 200, r.text
+    detail = r.json()
+    assert detail["needs_checked_at"] and [(f["area"], f["category"], f["reached"]) for f in detail["findings"]] == [("Lyari", "Hygiene items", "none")]
+
+    donor_h = auth(register(client).json()["access_token"])
+    south = client.get(f"{API}/needs", headers=donor_h, params={"parent_id": area(db, "Karachi")}).json()
+    hygiene = next(n for n in next(r for r in south["children"] if r["name"] == "Karachi South")["needs"] if n["category_id"] == 6)
+    reason = next(x for x in hygiene["reasons"] if x["source"].startswith("Report"))
+    assert hygiene["level"] >= 2 and reason["report_id"] == rep["id"] and reason["quote"] == "hygiene kits ran out last month"
+    assert "No aid has reached them yet" in reason["why"] and "lyari assessment" in reason["source"].lower()
+
+    # Archived: its needs stop counting
+    client.post(f"{API}/admin/reports/{rep['id']}/archive", headers=admin_h)
+    south = client.get(f"{API}/needs", headers=donor_h, params={"parent_id": area(db, "Karachi")}).json()
+    row = next(r for r in south["children"] if r["name"] == "Karachi South")
+    assert not any(x["source"].startswith("Report") for n in row["needs"] for x in n["reasons"])

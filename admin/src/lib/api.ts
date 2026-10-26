@@ -345,7 +345,8 @@ export interface NeedReason {
   alert_id?: string;
   url?: string | null;   // source link (AI web scan)
   old?: boolean;         // data more than a year old (counts less)
-  quote?: string | null; // AI web scan: the source's words that show the gap
+  quote?: string | null; // AI web scan / report reader: the source's words that show the gap
+  report_id?: string | null; // report reader: the library report
   reached?: "none" | "partial" | "unknown";
 }
 
@@ -442,8 +443,21 @@ export interface ReportChunk {
   places: ChunkTag[];
 }
 
+export interface ReportFinding {
+  area: string | null;
+  category: string;
+  level: number;
+  why: string | null;
+  unmet: string | null;
+  reached: "none" | "partial" | "unknown" | null;
+  page: number | null;
+  date: string | null;
+}
+
 export interface ReportDetail extends ReportItem {
   chunk_list: ReportChunk[];
+  needs_checked_at: string | null;   // when the AI read it for unmet needs
+  findings: ReportFinding[];
 }
 
 export interface RagStatus {
@@ -451,6 +465,7 @@ export interface RagStatus {
   claude: boolean;       // older name for "ai"
   ai: boolean;
   ai_model: string;      // e.g. "OpenAI gpt-5.5"
+  needs_waiting: number; // reports not read for unmet needs yet
   reliefweb: boolean;
   reports: number;
   chunks: number;

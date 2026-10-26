@@ -385,6 +385,7 @@ function Reasons({ picked }: { picked: Picked }) {
             </div>
             {r.alert_id && <Link className="small" to={`/disasters?id=${r.alert_id}`}>Open the alert</Link>}
             {r.url && <a className="small" href={r.url} target="_blank" rel="noreferrer">Open the source</a>}
+            {r.report_id && <>{r.url ? " · " : ""}<Link className="small" to={`/reports?id=${r.report_id}`}>Open in the report library</Link></>}
           </li>
         ))}
       </ul>

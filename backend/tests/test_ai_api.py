@@ -57,7 +57,7 @@ def test_ai_review_needs_key(client, db):
     rider = register(client, role="rider").json()
     r = client.post(f"{API}/admin/riders/{rider['user']['id']}/ai-review", headers=admin_h)
     # Without a key, or without documents, the admin gets a clear message instead of a crash
-    if not settings.ANTHROPIC_API_KEY:
-        assert r.status_code == 503 and "ANTHROPIC_API_KEY" in r.json()["detail"]["message"]
+    if not (settings.ANTHROPIC_API_KEY or settings.OPENAI_API_KEY):
+        assert r.status_code == 503 and "API_KEY" in r.json()["detail"]["message"]
     else:
         assert r.status_code == 503 and "documents" in r.json()["detail"]["message"]
