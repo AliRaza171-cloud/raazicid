@@ -145,7 +145,7 @@ export default function NeedFinder() {
                   {res.points.map((pt, i) => <li key={i}>{cite(pt)}</li>)}
                 </ul>
               )}
-              {res.note && <p className="muted" style={{ margin: 0, fontSize: 14 }}>Not covered: {res.note}</p>}
+              {res.note && <p className="muted" style={{ margin: 0, fontSize: 14 }}>ⓘ Good to know: {res.note}</p>}
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", borderTop: "1px solid var(--line)", paddingTop: 10 }}>
                 <span className="muted small">
                   Based on {res.sources.length} report passage{res.sources.length === 1 ? "" : "s"}

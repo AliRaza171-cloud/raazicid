@@ -62,7 +62,7 @@ FORMAT = """Reply with JSON only, inside ```json fences:
  "points": ["short point with its source, e.g. Rawalpindi is short of 40% of new textbooks [S1]"],
  "areas": [{"name": "district or city in Pakistan", "need": "urgent | high | some",
             "categories": ["School supplies", "Books"], "reason": "one short sentence with its source", "sources": ["S1", "D2"]}],
- "note": "one short sentence on what the sources do not cover, or empty",
+ "note": "one plain sentence on what this answer could not check, or empty. Say 'our reports' and 'our own data', never 'library passages' or 'need levels'. Example: Our reports don't mention hygiene kits yet, so this comes from the web.",
  "confidence": "low | medium | high"}
 At most 4 points and 5 areas, most needed first. Use the category names RAAZICID uses. Empty lists if nothing fits."""
 
@@ -88,14 +88,40 @@ def _fmt_date(d: Optional[datetime]) -> str:
     return d.strftime("%d %b %Y") if d else "date unknown"
 
 
-def need_facts(db: Session, location_id: Optional[uuid.UUID], category_id: Optional[int], limit: int = 12) -> list[dict]:
-    """Our own computed need levels as numbered facts [D1], [D2]..."""
+# Words in a question that point at a category, when the admin did not pick one
+QUESTION_WORDS: dict[str, tuple[str, ...]] = {
+    "food": ("food", "meal", "hunger", "hungry", "cooked", "iftar", "nutrition", "malnutrition"),
+    "grocery_ration": ("ration", "grocery", "groceries", "flour", "atta", "wheat", "rice", "staple"),
+    "clothes": ("clothes", "clothing", "shoes", "uniform", "garment"),
+    "blankets": ("blanket", "quilt", "razai", "bedding"),
+    "winter_support": ("winter", "cold", "warm", "jacket", "sweater", "heater"),
+    "hygiene": ("hygiene", "soap", "sanitary", "sanitation", "toilet", "menstrual", "wash", "clean water", "diarrh"),
+    "baby": ("baby", "babies", "infant", "diaper", "nappy", "milk formula", "newborn"),
+    "household": ("household", "utensil", "kitchen", "cooking pot", "mattress", "shelter", "tent"),
+    "school_supplies": ("school", "stationery", "notebook", "copies", "bag", "student", "education", "uniform"),
+    "books": ("book", "textbook", "reading"),
+    "mobility_aids": ("wheelchair", "crutch", "walker", "disabled", "disability", "mobility"),
+    "emergency_relief": ("flood", "earthquake", "disaster", "relief", "emergency", "displaced", "cyclone"),
+}
+
+
+def guess_categories(question: str) -> list[str]:
+    """Category slugs the question talks about ("hygiene kits for women" -> ["hygiene"]). Empty when none."""
+    q = question.lower()
+    return [slug for slug, words in QUESTION_WORDS.items() if any(re.search(r"\b" + re.escape(w), q) for w in words)]
+
+
+def need_facts(db: Session, location_id: Optional[uuid.UUID], category_id: Optional[int], limit: int = 12,
+               category_ids: Optional[list[int]] = None) -> list[dict]:
+    """Our own computed need levels as numbered facts [D1], [D2]... for the chosen (or guessed) categories."""
     cats = {c.id: c.name for c in db.scalars(select(Category))}
     stmt = select(NeedLevel, Location).join(Location, Location.id == NeedLevel.location_id).where(NeedLevel.level >= 1)
     if location_id:
         stmt = stmt.where(NeedLevel.location_id.in_(descendant_ids(db, location_id)))
     if category_id:
         stmt = stmt.where(NeedLevel.category_id == category_id)
+    elif category_ids:
+        stmt = stmt.where(NeedLevel.category_id.in_(category_ids))
     rows = db.execute(stmt.order_by(NeedLevel.score.desc()).limit(limit)).all()
     out = []
     for i, (nl, loc) in enumerate(rows, start=1):
@@ -244,12 +270,15 @@ def find_needs(db: Session, question: str, location_id: Optional[uuid.UUID] = No
     cat = db.get(Category, category_id) if category_id else None
     cat_name = cat.name if cat else None   # plain values: reading ORM objects after a commit would reopen a transaction
     query = " ".join(x for x in [question, cat_name or "", place.split(" › ")[-1] if place else ""] if x)
+    # No category chosen: use the ones the question talks about, so "hygiene kits" gets hygiene data, not food
+    slugs = guess_categories(question) if not category_id else []
+    guessed = [c.id for c in db.scalars(select(Category).where(Category.slug.in_(slugs)))] if slugs else []
     db.commit()
     from_reliefweb = reliefweb_lookup(db, query)   # live UN / NGO reports into the library first (needs the appname)
     qvec = query_vector(query)
     hits = search(db, query, location_id, k=8, qvec=qvec)
-    facts = need_facts(db, location_id, category_id)
-    facts += un_facts(db, location_id, category_id, start=len(facts) + 1)
+    facts = need_facts(db, location_id, category_id, category_ids=guessed)
+    facts += un_facts(db, location_id, category_id or (guessed[0] if len(guessed) == 1 else None), start=len(facts) + 1)
     db.commit()   # Neon closes connections idle inside a transaction; Claude (with web search) can take minutes
 
     sources = [{"id": f"S{i}", "report_id": str(h.report_id), "chunk_id": str(h.chunk_id), "title": h.title,

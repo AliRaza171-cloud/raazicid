@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from app.services.rag.finder import _cited, build_prompt, tidy, use_web, web_list
+from app.services.rag.finder import _cited, build_prompt, guess_categories, tidy, use_web, web_list
 from app.services.rag.search import Hit, keywords, rrf
 from app.services.rag.text import chunk_pages, clean, html_text
 
@@ -93,3 +93,10 @@ def test_web_list_puts_quoted_pages_first():
     out = web_list(cites, searched)
     assert [(w["url"], w["cited"]) for w in out] == [("https://dawn.com/a", True), ("https://geo.tv/b", False)]
     assert out[0]["snippet"] == "40% shortage" and out[1]["age"] == "2 days ago"
+
+
+def test_question_words_pick_categories():
+    assert guess_categories("Which areas need hygiene kits for women and children?") == ["hygiene"]
+    assert guess_categories("Where are blankets and winter clothes needed most?") == ["clothes", "blankets", "winter_support"]
+    assert set(guess_categories("School books are short in Rawalpindi")) == {"school_supplies", "books"}
+    assert guess_categories("Where should we help next?") == []
