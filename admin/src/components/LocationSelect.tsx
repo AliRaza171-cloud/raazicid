@@ -11,7 +11,7 @@ export default function LocationSelect({
   compact = false,
   allLabel = "All",
 }: {
-  onChange: (id: string | null, path: string[]) => void;
+  onChange: (id: string | null, path: string[], chosen: LocationItem[]) => void;
   compact?: boolean;
   allLabel?: string;
 }) {
@@ -24,7 +24,7 @@ export default function LocationSelect({
   const choose = async (index: number, id: string) => {
     const next = levels.slice(0, index + 1).map((l, i) => (i === index ? { ...l, selected: id } : l));
     const chosen = next.map((l) => l.options.find((o) => o.id === l.selected)).filter(Boolean) as LocationItem[];
-    onChange(chosen.length ? chosen[chosen.length - 1].id : null, chosen.map((c) => c.name));
+    onChange(chosen.length ? chosen[chosen.length - 1].id : null, chosen.map((c) => c.name), chosen);
     if (id && index < 3) {
       const children = await api<LocationItem[]>(`/locations?parent_id=${id}`).catch(() => []);
       if (children.length) next.push({ options: children, selected: "" });

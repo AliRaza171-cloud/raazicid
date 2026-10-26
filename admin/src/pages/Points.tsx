@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import LocationSelect from "../components/LocationSelect";
 import { PageHeader } from "../components/Layout";
-import { api, type Category, type Point, type PointDetail, type PointType } from "../lib/api";
+import { ApiError, api, type Category, type LocationItem, type Point, type PointDetail, type PointType } from "../lib/api";
 import { POINT_TYPES, date, pointTypeLabel } from "../lib/format";
 
 type Editing = { mode: "new" } | { mode: "edit"; id: string };
@@ -83,6 +83,7 @@ export default function Points() {
                       <td>
                         {p.location_path.slice(-2).join(" · ")}
                         <div className="muted small">{p.location_path[0]}</div>
+                        {p.place_warning && <span className="chip bad" title={p.place_warning}>Pin in the wrong place?</span>}
                       </td>
                       <td>
                         <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
@@ -151,6 +152,9 @@ function PointPanel({ editing, cats, onClose, onSaved }: {
   const [closesAt, setClosesAt] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [far, setFar] = useState(false);          // the API said the coordinates are far from the place
+  const [allowFar, setAllowFar] = useState(false);
+  const [centrePlace, setCentrePlace] = useState<LocationItem | null>(null);
 
   const fill = (p: PointDetail) => {
     setPoint(p);
@@ -187,6 +191,7 @@ function PointPanel({ editing, cats, onClose, onSaved }: {
       same_day_food: sameDayFood, is_active: active,
       closes_at: closesAt ? new Date(`${closesAt}T23:59:00`).toISOString() : null,
       category_ids: accepts,
+      allow_far: allowFar,
     };
     setBusy(true);
     try {
@@ -195,14 +200,20 @@ function PointPanel({ editing, cats, onClose, onSaved }: {
           ? await api<PointDetail>("/admin/points", { method: "POST", body: JSON.stringify(body) })
           : await api<PointDetail>(`/admin/points/${editing.id}`, { method: "PATCH", body: JSON.stringify(body) });
       fill(out);
+      setFar(false);
+      setAllowFar(false);
       setChangeLocation(false);
       onSaved(out, editing.mode === "new");
     } catch (err) {
       setError((err as Error).message);
+      setFar(err instanceof ApiError && err.code === "coords_far");
     } finally {
       setBusy(false);
     }
   };
+
+  const coordsOk = /^\s*-?\d+(\.\d+)?\s*[, ]\s*-?\d+(\.\d+)?\s*$/.test(coords);
+  const mapsLink = coordsOk ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(coords.replace(/\s+/g, ""))}` : null;
 
   return (
     <aside className="card" style={{ flex: "1 1 360px", display: "flex", flexDirection: "column", gap: 14 }} aria-label="Point details">
@@ -226,7 +237,13 @@ function PointPanel({ editing, cats, onClose, onSaved }: {
           <div>
             <label>Location</label>
             {changeLocation ? (
-              <LocationSelect allLabel="Choose" onChange={(id) => setLocationId(id)} />
+              <LocationSelect allLabel="Choose" onChange={(id, _path, chosen) => {
+                setLocationId(id);
+                setFar(false);
+                setAllowFar(false);
+                // the most specific chosen place with map coordinates (not a whole province)
+                setCentrePlace([...chosen].reverse().find((c) => c.level !== "province" && c.lat != null && c.lng != null) ?? null);
+              }} />
             ) : (
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <span style={{ flex: 1 }}>{point?.location_path.join(" › ")}</span>
@@ -241,7 +258,16 @@ function PointPanel({ editing, cats, onClose, onSaved }: {
           <div>
             <label htmlFor="pcoords">Coordinates (latitude, longitude)</label>
             <input id="pcoords" className="input" value={coords} onChange={(e) => setCoords(e.target.value)} required placeholder="24.8607, 67.0011" />
-            <span className="muted small">In Google Maps, right-click the place and click the numbers to copy them. A map picker comes in Phase 4.</span>
+            <span className="muted small">In Google Maps, right-click the exact building and click the numbers to copy them (latitude first).</span>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+              {centrePlace && (
+                <button type="button" className="btn ghost small" onClick={() => { setCoords(`${centrePlace.lat}, ${centrePlace.lng}`); setFar(false); }}>
+                  Use the centre of {centrePlace.name}
+                </button>
+              )}
+              {mapsLink && <a className="btn ghost small" href={mapsLink} target="_blank" rel="noreferrer">Check on Google Maps</a>}
+            </div>
+            {point?.place_warning && !changeLocation && <div className="flash bad" style={{ marginTop: 6 }}>{point.place_warning}</div>}
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <div style={{ flex: "1 1 140px" }}>
@@ -274,6 +300,11 @@ function PointPanel({ editing, cats, onClose, onSaved }: {
             <input id="pcloses" type="date" className="input" value={closesAt} onChange={(e) => setClosesAt(e.target.value)} />
           </div>
           {error && <div className="flash bad" role="alert">{error}</div>}
+          {far && (
+            <label style={{ display: "flex", gap: 8, alignItems: "center", margin: 0 }}>
+              <input type="checkbox" checked={allowFar} onChange={(e) => setAllowFar(e.target.checked)} /> These coordinates are right, save anyway
+            </label>
+          )}
           <button className="btn" type="submit" disabled={busy}>{busy ? "Saving…" : editing.mode === "new" ? "Add point" : "Save changes"}</button>
         </form>
       )}

@@ -18,7 +18,7 @@ from app.schemas.donations import (
 from app.schemas.points import PointOut
 from app.services.accounts import notify
 from app.services.geo import distance_km
-from app.services.locations import ancestor_ids, location_path
+from app.services.locations import ancestor_ids, coords_problem, location_path
 from app.services.urgency import food_urgency
 
 # Which moves are allowed (from -> to). Phase 4 uses the rider steps.
@@ -224,6 +224,7 @@ def point_out(db: Session, p: DistributionPoint) -> PointOut:
         same_day_food=p.same_day_food, is_active=p.is_active, closes_at=p.closes_at,
         categories=[CategoryRef(id=c.id, name=c.name) for c in sorted(p.categories, key=lambda c: c.id)],
         items_30d=items_30d(db, p.id), open_requests=open_req, created_at=p.created_at,
+        place_warning=coords_problem(db, p.location_id, p.lat, p.lng),
     )
 
 

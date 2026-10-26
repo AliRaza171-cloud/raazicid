@@ -149,6 +149,8 @@ export interface LocationItem {
   name: string;
   level: "province" | "city" | "region" | "area";
   parent_id: string | null;
+  lat?: number | null;
+  lng?: number | null;
 }
 
 export interface RiderItem {
@@ -318,6 +320,7 @@ export interface Point {
   items_30d: number;
   open_requests: number;
   created_at: string;
+  place_warning?: string | null;
 }
 
 export interface PointRequest {

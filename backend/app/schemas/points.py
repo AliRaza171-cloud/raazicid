@@ -46,6 +46,7 @@ class PointIn(_PointFields):
     is_active: bool = True
     closes_at: Optional[datetime] = None
     category_ids: list[int] = Field(default_factory=list, description="Empty = accepts every category")
+    allow_far: bool = Field(default=False, description="Save even if the coordinates are far from the chosen place")
 
 
 class PointUpdate(_PointFields):
@@ -61,6 +62,7 @@ class PointUpdate(_PointFields):
     is_active: Optional[bool] = None
     closes_at: Optional[datetime] = None
     category_ids: Optional[list[int]] = None
+    allow_far: bool = False
 
 
 class PointRequestIn(BaseModel):
@@ -101,6 +103,7 @@ class PointOut(BaseModel):
     items_30d: int                  # donations sent here in the last 30 days
     open_requests: int
     created_at: datetime
+    place_warning: Optional[str] = None   # coordinates far from the chosen place (wrong pin on the map)
 
 
 class PointDetail(PointOut):

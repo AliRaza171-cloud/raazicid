@@ -15,7 +15,7 @@ from app.models.enums import RequestStatus, RiderStatus, Role
 from app.schemas.donations import CategoryRef
 from app.schemas.points import PointDetail, PointIn, PointOut, PointRequestIn, PointRequestOut, PointRequestUpdate, PointUpdate
 from app.services.donations import check_location, point_is_open, point_out
-from app.services.locations import descendant_ids
+from app.services.locations import coords_problem, descendant_ids
 
 router = APIRouter(tags=["distribution points"])
 admin_only = require_roles(Role.admin)
@@ -42,6 +42,14 @@ def _get(db: Session, point_id: uuid.UUID) -> DistributionPoint:
     if p is None:
         raise api_error(404, "point_not_found", "Distribution point not found")
     return p
+
+
+def _check_coords(db: Session, location_id: uuid.UUID, lat: float, lng: float, allow_far: bool) -> None:
+    """Stop a pin in the wrong city (the map and riders' directions use these numbers)."""
+    problem = coords_problem(db, location_id, lat, lng)
+    if problem and not allow_far:
+        raise api_error(422, "coords_far", f"{problem} Copy the coordinates of the point itself from Google Maps, "
+                                           "or use the centre of the place.")
 
 
 def _requests(db: Session, p: DistributionPoint) -> list[PointRequestOut]:
@@ -84,7 +92,8 @@ def get_point(point_id: uuid.UUID, _: User = Depends(staff), db: Session = Depen
 @router.post("/admin/points", response_model=PointDetail, status_code=status.HTTP_201_CREATED)
 def create_point(body: PointIn, _: User = Depends(admin_only), db: Session = Depends(get_db)):
     check_location(db, body.location_id)
-    data = body.model_dump(exclude={"category_ids"})
+    _check_coords(db, body.location_id, body.lat, body.lng, body.allow_far)
+    data = body.model_dump(exclude={"category_ids", "allow_far"})
     p = DistributionPoint(**data)
     p.categories = _categories(db, body.category_ids)
     db.add(p)
@@ -97,8 +106,11 @@ def create_point(body: PointIn, _: User = Depends(admin_only), db: Session = Dep
 def update_point(point_id: uuid.UUID, body: PointUpdate, _: User = Depends(admin_only), db: Session = Depends(get_db)):
     p = _get(db, point_id)
     data = body.model_dump(exclude_unset=True)
+    allow_far = data.pop("allow_far", False)
     if data.get("location_id"):
         check_location(db, data["location_id"])
+    if data.get("location_id") or data.get("lat") is not None:
+        _check_coords(db, data.get("location_id") or p.location_id, data.get("lat") or p.lat, data.get("lng") or p.lng, allow_far)
     if "category_ids" in data:
         p.categories = _categories(db, data.pop("category_ids") or [])
     for required in ("name", "type", "location_id", "address", "lat", "lng", "same_day_food", "is_active"):

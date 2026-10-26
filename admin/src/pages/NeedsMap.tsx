@@ -52,7 +52,11 @@ export default function NeedsMap() {
   useEffect(load, [load]);
   useEffect(() => {
     api<Category[]>("/categories").then(setCats).catch(() => undefined);
-    api<Point[]>("/points?open_only=true").then(setPoints).catch(() => undefined);
+    // reload points when you come back to this tab (e.g. after adding one on the Points page)
+    const loadPoints = () => api<Point[]>("/points?open_only=true").then(setPoints).catch(() => undefined);
+    loadPoints();
+    window.addEventListener("focus", loadPoints);
+    return () => window.removeEventListener("focus", loadPoints);
   }, []);
 
   const clearFocus = () => {
@@ -171,7 +175,7 @@ export default function NeedsMap() {
     ...pointsHere.map((p) => ({
       id: `p-${p.id}`, lat: p.lat, lng: p.lng, kind: "point" as const, square: true, size: 14,
       color: p.type === "relief_camp" ? CAMP_COLOR : POINT_COLOR, selected: focusPoint === p.id,
-      label: `${p.name} (${pointTypeLabel(p.type)})`,
+      label: `${p.name} (${pointTypeLabel(p.type)})${p.place_warning ? " · pin may be in the wrong place" : ""}`,
       onClick: () => { setFocusRow(null); setPicked(null); setFocusPoint(p.id); },
     })),
   ];
@@ -213,7 +217,7 @@ export default function NeedsMap() {
           {LEVELS.map((l) => <span key={l.label}><span className={`sw ${l.cls}`} />{l.label}</span>)}
           {view === "map" ? (
             <>
-              <span><span className="sw" style={{ background: POINT_COLOR, borderRadius: 4 }} />Distribution point</span>
+              <span><span className="sw" style={{ background: POINT_COLOR, borderRadius: 4 }} />Open distribution point</span>
               <span><span className="sw" style={{ background: CAMP_COLOR, borderRadius: 4 }} />Relief camp</span>
               <span><span className="sw" style={{ background: "#fff", boxShadow: `0 0 0 2px ${GAP_RING}`, borderRadius: 9 }} />No point nearby</span>
               <span className="muted">· Click a place or a point.</span>

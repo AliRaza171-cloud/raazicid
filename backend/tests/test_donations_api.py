@@ -48,6 +48,17 @@ def test_points_crud_and_access(client, db):
     bad = client.post(f"{API}/admin/points", headers=admin_h, json={**{k: p[k] for k in ("name", "type", "location_id", "address")}, "lat": 67.0, "lng": 24.86})
     assert bad.status_code == 422
 
+    # Karachi coordinates for a Hyderabad point are stopped, unless the admin says they are right
+    hyd = {"name": "Hyderabad Hall", "type": "community_centre", "location_id": area(db, "Hyderabad"), "address": "Latifabad",
+           "lat": 24.8607, "lng": 67.0011}
+    far = client.post(f"{API}/admin/points", headers=admin_h, json=hyd)
+    assert far.status_code == 422 and far.json()["detail"]["code"] == "coords_far" and "Hyderabad" in far.json()["detail"]["message"]
+    kept = client.post(f"{API}/admin/points", headers=admin_h, json={**hyd, "allow_far": True})
+    assert kept.status_code == 201 and "Hyderabad" in kept.json()["place_warning"]
+    fixed = client.patch(f"{API}/admin/points/{kept.json()['id']}", headers=admin_h, json={"lat": 25.39, "lng": 68.37})
+    assert fixed.status_code == 200 and fixed.json()["place_warning"] is None
+    assert p["place_warning"] is None
+
     upd = client.patch(f"{API}/admin/points/{p['id']}", headers=admin_h, json={"same_day_food": True, "category_ids": []})
     assert upd.status_code == 200 and upd.json()["same_day_food"] and upd.json()["categories"] == []
 

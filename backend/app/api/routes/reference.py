@@ -27,6 +27,8 @@ class LocationOut(BaseModel):
     name: str
     level: LocationLevel
     parent_id: Optional[uuid.UUID]
+    lat: Optional[float] = None
+    lng: Optional[float] = None
 
 
 @router.get("/categories", response_model=list[CategoryOut])
@@ -45,4 +47,4 @@ def list_locations(
     stmt = stmt.where(Location.parent_id == parent_id) if parent_id else stmt.where(
         Location.level == LocationLevel.province
     )
-    return [LocationOut(id=l.id, name=l.name, level=l.level, parent_id=l.parent_id) for l in db.scalars(stmt)]
+    return [LocationOut(id=l.id, name=l.name, level=l.level, parent_id=l.parent_id, lat=l.lat, lng=l.lng) for l in db.scalars(stmt)]
