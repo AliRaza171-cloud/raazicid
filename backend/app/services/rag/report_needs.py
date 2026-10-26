@@ -103,7 +103,7 @@ def save(db: Session, report_id: uuid.UUID, items: list[dict[str, Any]]) -> str:
                                  period_start=it["date"], period_end=it["date"], source_id=r.source_id, report_id=r.id,
                                  meta={"why": it["why"], "unmet": it.get("unmet", ""), "reached": it.get("reached", "unknown"),
                                        "page": it.get("page"), "area": it["area"], "title": r.title[:200],
-                                       "publisher": r.publisher, "url": r.url, "model": llm.label()}))
+                                       "publisher": r.publisher, "url": r.url, "model": llm.used_label()}))
         added += 1
     r.needs_checked_at = datetime.now(timezone.utc)
     db.commit()

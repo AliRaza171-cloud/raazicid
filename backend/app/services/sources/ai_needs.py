@@ -212,12 +212,12 @@ def sync(db: Session, items: list[dict[str, Any]], source_id: int, province_id: 
             db.add(NeedIndicator(location_id=loc.id, category_id=cat_ids.get(slug), indicator="ai_need", value=it["level"],
                                  period_start=it["date"], period_end=it["date"], source_id=source_id,
                                  meta={"why": it["why"], "unmet": it.get("unmet", ""), "reached": it.get("reached", "unknown"),
-                                       "sources": it["sources"], "area": it["area"], "model": llm.label()}))
+                                       "sources": it["sources"], "area": it["area"], "model": llm.used_label()}))
         added += 1
     db.commit()
     where = "" if not skipped else f" ({skipped} not matched to our places)"
     sources = len({_page(it["sources"][0]["url"]) for it in items if it["sources"]})
-    return f"{len(items)} needs found from {sources} sources, {added} added{where} · {llm.label()}"
+    return f"{len(items)} needs found from {sources} sources, {added} added{where} · {llm.used_label()}"
 
 
 def run(db: Session, source_id: int, province_id: Optional[uuid.UUID] = None) -> str:

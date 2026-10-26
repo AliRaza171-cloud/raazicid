@@ -35,7 +35,9 @@ def ask(messages: list[dict[str, Any]], *, system: str | None = None, tools: lis
             msg = res.json().get("error", {}).get("message", "")
         except ValueError:
             msg = ""
-        raise ClaudeError(f"Claude API error {res.status_code}. {msg}".strip())
+        err = ClaudeError(f"Claude API error {res.status_code}. {msg}".strip())
+        err.status = res.status_code
+        raise err
     return res.json()
 
 

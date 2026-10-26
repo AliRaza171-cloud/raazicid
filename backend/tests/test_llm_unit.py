@@ -57,3 +57,40 @@ def test_openai_inline_links_become_web_markers():
         "Rawalpindi has a 40% textbook shortage. [Web]"
     assert tidy("See [the NDMA report](https://ndma.gov.pk/sitrep) for details.") == "See the NDMA report for details."   # link text kept, URL gone
     assert tidy("Floods hit Swat ([geo.tv](https://www.geo.tv/a)), PDMA said.") == "Floods hit Swat, [Web] PDMA said."
+
+
+class FakeResponse:
+    def __init__(self, status, body):
+        self.status_code, self._body = status, body
+
+    def json(self):
+        return self._body
+
+
+def test_out_of_credit_is_explained(monkeypatch):
+    monkeypatch.setattr(settings, "AI_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "")
+    quota = {"error": {"message": "You exceeded your current quota, please check your plan and billing details.",
+                       "type": "insufficient_quota", "code": "insufficient_quota"}}
+    monkeypatch.setattr(llm.httpx, "post", lambda *a, **k: FakeResponse(429, quota))
+    try:
+        llm.complete("hello")
+        raise AssertionError("should fail")
+    except llm.LLMError as e:
+        assert e.out_of_credit and "credits have run out" in str(e) and "ANTHROPIC_API_KEY" in str(e)
+
+
+def test_rate_limit_is_not_out_of_credit():
+    assert not llm.is_out_of_credit("openai", 429, "Rate limit reached for requests", "rate_limit_exceeded")
+    assert llm.is_out_of_credit("claude", 400, "Your credit balance is too low to access the Anthropic API.")
+
+
+def test_switches_to_claude_when_openai_has_no_credit(monkeypatch):
+    monkeypatch.setattr(settings, "AI_PROVIDER", "openai")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setattr(llm, "_openai", lambda *a: (_ for _ in ()).throw(llm.LLMError("no credit", out_of_credit=True)))
+    monkeypatch.setattr(llm, "_claude", lambda *a: llm.Answer(text="ok", model="claude-x", provider="claude"))
+    assert llm.complete("hello").provider == "claude"
+    assert "switched" in llm.used_label()

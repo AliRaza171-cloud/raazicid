@@ -74,5 +74,5 @@ def review_documents(name: str, vehicle_type: str, vehicle_number: str, docs: li
         out = _parse(res.text)
     except (ValueError, json.JSONDecodeError):
         raise ReviewError("The AI answer was not in the expected format. Try again.")
-    out["model"] = llm.label()
+    out["model"] = llm.used_label()
     return out

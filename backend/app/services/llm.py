@@ -17,7 +17,35 @@ OPENAI_URL = "https://api.openai.com/v1/responses"
 
 
 class LLMError(Exception):
-    """A readable problem: not set up, no internet, the API refused, ..."""
+    """A readable problem: not set up, no internet, the API refused, the credits ran out..."""
+
+    def __init__(self, message: str, out_of_credit: bool = False):
+        super().__init__(message)
+        self.out_of_credit = out_of_credit
+
+
+BILLING = {"openai": "platform.openai.com (Settings, Billing)", "claude": "console.anthropic.com (Settings, Billing)"}
+NAME = {"openai": "OpenAI", "claude": "Claude"}
+_last_used: dict[str, str] = {}
+
+
+def is_out_of_credit(p: str, status: int, message: str, code: str = "") -> bool:
+    """True when the API refused because the account has no credit left (not a passing rate limit)."""
+    m = message.lower()
+    if p == "openai":
+        return code == "insufficient_quota" or "exceeded your current quota" in m or "billing" in m and status in (402, 429)
+    return "credit balance is too low" in m or (status == 402)
+
+
+def out_of_credit_message(p: str, other_tried: bool = False) -> str:
+    if other_tried:
+        return ("The AI credits have run out for both OpenAI and Claude, so no new search was done. Add credits at "
+                f"{BILLING['openai']} or {BILLING['claude']}. The need levels shown come from the last scan and the other data sources.")
+    other = "claude" if p == "openai" else "openai"
+    key = "ANTHROPIC_API_KEY" if other == "claude" else "OPENAI_API_KEY"
+    return (f"Your {NAME[p]} credits have run out, so no new search was done. Add credits at {BILLING[p]}, "
+            f"or add {key} to backend/.env and restart the backend to use {NAME[other]} instead. "
+            "The need levels shown come from the last scan and the other data sources.")
 
 
 @dataclass
@@ -64,7 +92,39 @@ def complete(prompt: str, *, system: Optional[str] = None, web: Optional[dict[st
     images = public https URLs shown before the prompt (document check)."""
     if not available():
         raise LLMError(not_set_up())
-    if provider() == "openai":
+    first = provider()
+    try:
+        answer = _call(first, prompt, system, web, images, max_tokens, timeout)
+    except LLMError as e:
+        if not e.out_of_credit:
+            raise
+        other = "claude" if first == "openai" else "openai"
+        if not has_key(other):
+            raise LLMError(out_of_credit_message(first), out_of_credit=True)
+        try:   # credits gone on one provider: use the other one if its key is set
+            answer = _call(other, prompt, system, web, images, max_tokens, timeout)
+        except LLMError as e2:
+            if e2.out_of_credit:
+                raise LLMError(out_of_credit_message(first, other_tried=True), out_of_credit=True)
+            raise
+    _last_used.update(provider=answer.provider, model=answer.model)
+    return answer
+
+
+def has_key(p: str) -> bool:
+    return bool(settings.OPENAI_API_KEY if p == "openai" else settings.ANTHROPIC_API_KEY)
+
+
+def used_label() -> str:
+    """The provider that actually answered last (it differs from label() after a switch for lack of credit)."""
+    if not _last_used:
+        return label()
+    switched = " (switched: the other provider had no credit)" if _last_used["provider"] != provider() else ""
+    return f"{NAME[_last_used['provider']]} {_last_used['model']}{switched}"
+
+
+def _call(p, prompt, system, web, images, max_tokens, timeout) -> Answer:
+    if p == "openai":
         return _openai(prompt, system, web, images, max_tokens, timeout)
     return _claude(prompt, system, web, images, max_tokens, timeout)
 
@@ -128,9 +188,12 @@ def _openai(prompt, system, web, images, max_tokens, timeout) -> Answer:
         raise LLMError("Could not reach the OpenAI API. Check the internet connection.")
     if res.status_code != 200:
         try:
-            msg = res.json().get("error", {}).get("message", "")
+            err = res.json().get("error", {}) or {}
         except ValueError:
-            msg = ""
+            err = {}
+        msg, code = str(err.get("message") or ""), str(err.get("code") or err.get("type") or "")
+        if is_out_of_credit("openai", res.status_code, msg, code):
+            raise LLMError(out_of_credit_message("openai"), out_of_credit=True)
         raise LLMError(f"OpenAI API error {res.status_code}. {msg}".strip())
     data = res.json()
     if data.get("status") == "incomplete":
@@ -158,6 +221,8 @@ def _claude(prompt, system, web, images, max_tokens, timeout) -> Answer:
     try:
         res = ask_complete([{"role": "user", "content": content}], system=system, tools=tools, max_tokens=max_tokens, timeout=timeout)
     except ClaudeError as e:
+        if is_out_of_credit("claude", getattr(e, "status", 0), str(e)):
+            raise LLMError(out_of_credit_message("claude"), out_of_credit=True)
         raise LLMError(str(e))
     text, cites = text_and_citations(res)
     return Answer(text=text, citations=cites, searched=search_results(res), model=settings.CLAUDE_MODEL, provider="claude")
