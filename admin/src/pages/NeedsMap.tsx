@@ -181,6 +181,8 @@ export default function NeedsMap() {
   }, [data, points, categoryId, levelOf, nearestFor]);
 
   const gapIds = new Set(gaps.map((g) => g.row.id));
+  // Places in high or urgent need where OCHA 3W lists nobody working on it
+  const neglected = data?.has_3w ? data.children.filter((r) => r.neglected.length > 0) : [];
   const pointsHere = points.filter((p) => !here.id || p.location_path.includes(here.name));
 
   const markers: MapMarker[] = [
@@ -331,7 +333,17 @@ export default function NeedsMap() {
         <DeprivationCard here={here.name} dep={dep} reload={loadDep}
           onDetails={(id) => { setPicked(null); setFocusPoint(null); setFocusRow(id); }} />
 
-        {data?.has_3w && (
+        {data && gaps.length === 0 && neglected.length === 0 && (
+          <div className="card" style={{ padding: "12px 18px", display: "flex", gap: 10, alignItems: "center" }}>
+            <span className="chip ok">All clear</span>
+            <span className="small">
+              Every high or urgent need in {here.name} has an NGO nearby that takes the item
+              {data.has_3w ? ", and an organisation working on it (OCHA 3W)" : ""}. If that changes, a list of the places will appear here.
+            </span>
+          </div>
+        )}
+
+        {data?.has_3w && neglected.length > 0 && (
           <section className="card" style={{ padding: 0 }}>
             <div style={{ padding: "16px 18px 0" }}>
               <h2 style={{ margin: 0, fontSize: 16 }}>Neglected places in {here.name}</h2>
@@ -339,13 +351,10 @@ export default function NeedsMap() {
                 High or urgent need, but no UN agency or NGO reports working on it there (OCHA 3W: who does what where).
               </p>
             </div>
-            {data.children.filter((r) => r.neglected.length > 0).length === 0 ? (
-              <p className="muted" style={{ padding: "10px 18px 16px", margin: 0 }}>None: every high need here has an organisation working on it.</p>
-            ) : (
-              <table className="table">
+            <table className="table">
                 <thead><tr><th>Place</th><th>Nobody working on</th><th>Organisations there</th><th /></tr></thead>
                 <tbody>
-                  {data.children.filter((r) => r.neglected.length > 0).map((r) => (
+                  {neglected.map((r) => (
                     <tr key={r.id}>
                       <td><strong>{r.name}</strong><div className="muted small" style={{ textTransform: "capitalize" }}>{r.level}</div></td>
                       <td>{r.neglected.join(", ")}</td>
@@ -358,10 +367,10 @@ export default function NeedsMap() {
                   ))}
                 </tbody>
               </table>
-            )}
           </section>
         )}
 
+        {gaps.length > 0 && (
         <section className="card" style={{ padding: 0 }}>
           <div style={{ padding: "16px 18px 0", display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
             <div style={{ marginRight: "auto", maxWidth: 720 }}>
@@ -380,12 +389,7 @@ export default function NeedsMap() {
               </button>
             )}
           </div>
-          {gaps.length === 0 ? (
-            <p className="muted" style={{ padding: "10px 18px 16px", margin: 0 }}>
-              {data ? "No gaps: every place in high or urgent need has an NGO nearby." : "Loading…"}
-            </p>
-          ) : (
-            <table className="table">
+          <table className="table">
               <thead><tr><th>Place</th><th>Need</th><th>Why it is a gap</th><th /></tr></thead>
               <tbody>
                 {gaps.map((g) => (
@@ -406,8 +410,8 @@ export default function NeedsMap() {
                 ))}
               </tbody>
             </table>
-          )}
         </section>
+        )}
       </main>
     </>
   );
