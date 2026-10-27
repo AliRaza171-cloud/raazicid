@@ -125,7 +125,8 @@ def need_facts(db: Session, location_id: Optional[uuid.UUID], category_id: Optio
     rows = db.execute(stmt.order_by(NeedLevel.score.desc()).limit(limit)).all()
     out = []
     for i, (nl, loc) in enumerate(rows, start=1):
-        why = "; ".join(f"{r.get('why')} ({r.get('source')}{', ' + r['date'] if r.get('date') else ''})" for r in (nl.reasons or [])[:3])
+        why = "; ".join(f"{r.get('why')} ({r.get('source')}{', ' + r['date'] if r.get('date') else ''}"
+                        f"{', old data from ' + str(r['old_year']) if r.get('old_year') else ''})" for r in (nl.reasons or [])[:3])
         out.append({"id": f"D{i}", "location_id": str(loc.id), "place": " › ".join(location_path(db, loc.id)),
                     "category": cats.get(nl.category_id, "?"), "level": LEVEL_NAMES[nl.level], "score": round(nl.score),
                     "why": why})

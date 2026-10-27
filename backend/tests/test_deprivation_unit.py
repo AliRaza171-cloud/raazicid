@@ -98,4 +98,4 @@ def test_dtm_displacement_latest_round_and_no_double_count():
     ]
     out = displacement(rows)
     assert len(out) == 1 and out[0]["people"] == 12500 and out[0]["period_end"] == date(2022, 10, 31)
-    assert score_idps(12500) == 50 and score_idps(150_000) == 80 and score_idps(500) == 0
+    assert score_idps(12500) == 45 and score_idps(150_000) == 70 and score_idps(500) == 0

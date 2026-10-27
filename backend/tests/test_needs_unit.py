@@ -109,3 +109,12 @@ def test_claude_helpers():
     text, cites = text_and_citations(res)
     assert text == "A B" and [c["url"] for c in cites] == ["https://a", "https://b"]
     assert extract_json('words {"x": 1} words') == {"x": 1}
+
+
+def test_freshness_and_strength_words():
+    from datetime import date
+    from app.services.needs import freshness, strength
+    today = date(2026, 10, 27)
+    assert freshness(date(2026, 9, 1), today) == "new" and freshness(date(2026, 1, 1), today) == "recent"
+    assert freshness(date(2025, 7, 1), today) == "old" and freshness(None, today) == "new"
+    assert [strength(p) for p in (90, 60, 40, 10)] == ["very strong", "strong", "medium", "weak"]

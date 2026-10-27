@@ -68,7 +68,7 @@ def test_deprivation_layer_and_dtm(client, db):
         needs = client.get(f"{API}/needs", headers=h, params={"parent_id": area(db, "Karachi")}).json()
         south = next(x for x in needs["children"] if x["name"] == "Karachi South")
         relief = next(n for n in south["needs"] if n["name"] == "Emergency relief")
-        assert any("150,000 displaced people" in r["why"] for r in relief["reasons"])
+        assert any("150,000 people who had to leave their homes" in r["why"] and r["fresh"] == "new" for r in relief["reasons"])
         assert all("PSLM" not in r["source"] for n in south["needs"] for r in n["reasons"])
 
         # Old DTM figures (2022) are no need signal, but stay in the deprivation layer
@@ -77,7 +77,7 @@ def test_deprivation_layer_and_dtm(client, db):
         recompute(db)
         needs = client.get(f"{API}/needs", headers=h, params={"parent_id": area(db, "Karachi")}).json()
         south = next(x for x in needs["children"] if x["name"] == "Karachi South")
-        assert all("displaced" not in r["why"] for n in south["needs"] for r in n["reasons"])
+        assert all("leave their homes" not in r["why"] for n in south["needs"] for r in n["reasons"])
 
         assert client.delete(f"{API}/admin/deprivation/illiteracy", headers=h).json() == {"removed": "illiteracy"}
     finally:

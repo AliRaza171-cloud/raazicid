@@ -93,7 +93,8 @@ export default function NeedsScreen() {
                       <View key={i}>
                         <Text style={{ color: colors.ink2 }}>• {r.why}</Text>
                         <Text style={{ color: colors.muted, fontSize: 12, marginLeft: 10 }}>
-                          {r.source}{r.date ? ` · ${r.date}` : ""}{r.place && r.place !== here.name ? ` · ${r.place}` : ""}
+                          {[r.place && r.place !== here.name ? r.place : null, r.date, r.fresh === "old" ? "older information" : null, r.source]
+                            .filter(Boolean).join(" · ")}
                         </Text>
                       </View>
                     ))}

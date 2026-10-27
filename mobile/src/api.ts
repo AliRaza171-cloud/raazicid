@@ -274,6 +274,7 @@ export interface NeedReason {
   date: string | null;
   place?: string | null;
   points: number;
+  fresh?: "new" | "recent" | "old";   // last 3 months / this year / over a year
 }
 
 export interface AreaNeed {

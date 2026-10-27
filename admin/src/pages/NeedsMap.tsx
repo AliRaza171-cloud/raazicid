@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { Link } from "react-router-dom";
 import { PageHeader } from "../components/Layout";
 import LiveMap, { type MapMarker } from "../components/LiveMap";
-import { api, type AreaNeed, type AreaNeeds, type AreaRow, type Category, type DepValue, type Deprivation, type Point } from "../lib/api";
+import { api, type AreaNeed, type AreaNeeds, type AreaRow, type Category, type DepValue, type Deprivation, type NeedReason, type Point } from "../lib/api";
 import { LEVELS, SHORT_CAT, ago, pointTypeLabel } from "../lib/format";
 
 const DOT = ["#9aa39e", "#d4a800", "#d9772b", "#a2361a"];
@@ -379,30 +379,73 @@ export default function NeedsMap() {
   );
 }
 
+const LEVEL_MEANING = ["", "Worth sending if you have these items.", "Send soon.", "Send these first."];
+const FRESH: Record<string, { label: string; cls: string; tip: string }> = {
+  new: { label: "New", cls: "ok", tip: "From the last 3 months" },
+  recent: { label: "This year", cls: "wait", tip: "From the last 12 months" },
+  old: { label: "Old", cls: "", tip: "Over a year old, so it counts less" },
+};
+
+function ReasonCard({ r, place, main }: { r: NeedReason; place: string; main: boolean }) {
+  const fresh = FRESH[r.fresh ?? (r.old ? "old" : "recent")];
+  const facts = [
+    r.place && r.place !== place ? `Where: ${r.place}` : null,
+    r.date ? `When: ${r.date}${r.old_year ? " (old)" : ""}` : null,
+    `From: ${r.source}`,
+  ].filter(Boolean);
+  return (
+    <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: "10px 12px", background: main ? "#fafbf9" : "#fff", opacity: r.old ? 0.85 : 1 }}>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+        <span className={`chip ${fresh.cls}`} title={fresh.tip} style={fresh.cls ? { height: 20, fontSize: 11 } : { height: 20, fontSize: 11, background: "var(--warn-bg)", color: "var(--warn)" }}>{fresh.label}</span>
+        {r.strength && <span className="chip wait" title={`${r.points} points`} style={{ height: 20, fontSize: 11 }}>{r.strength[0].toUpperCase() + r.strength.slice(1)} reason</span>}
+        {r.reached === "none" && <span className="chip bad" style={{ height: 20, fontSize: 11 }}>Nobody has helped them yet</span>}
+      </div>
+      <div style={{ fontWeight: main ? 700 : 600, fontSize: main ? 15 : 14 }}>{r.why}</div>
+      {r.quote && <div className="small" style={{ fontStyle: "italic", color: "var(--ink-2)", marginTop: 4 }}>“{r.quote}”</div>}
+      <div className="muted small" style={{ marginTop: 4 }}>{facts.join(" · ")}</div>
+      {(r.alert_id || r.url || r.report_id) && (
+        <div className="small" style={{ marginTop: 4, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {r.alert_id && <Link to={`/disasters?id=${r.alert_id}`}>Open the alert</Link>}
+          {r.url && <a href={r.url} target="_blank" rel="noreferrer">Open the source</a>}
+          {r.report_id && <Link to={`/reports?id=${r.report_id}`}>Open the report</Link>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Reasons({ picked }: { picked: Picked }) {
+  const [first, ...rest] = picked.need.reasons;
+  const lv = picked.need.level;
   return (
     <>
       <div>
-        <span className={`chip lv${picked.need.level}`}>{LEVELS[picked.need.level].label} · {picked.need.score}</span>
-        <h2 style={{ margin: "8px 0 0", fontSize: 18 }}>{picked.need.name} in {picked.place}</h2>
+        <span className={`chip lv${lv}`}>{LEVELS[lv].label} need</span>
+        <h2 style={{ margin: "8px 0 2px", fontSize: 18 }}>{picked.place} needs {picked.need.name.toLowerCase()}</h2>
+        <div className="small" style={{ color: "var(--ink-2)" }}>{LEVEL_MEANING[lv]}</div>
       </div>
-      <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 10 }}>
-        {picked.need.reasons.map((r, i) => (
-          <li key={i} style={{ opacity: r.old ? 0.7 : 1 }}>
-            {r.reached === "none" && <span className="chip bad" style={{ marginBottom: 4 }}>Nobody has reached them yet</span>}
-            <div style={{ fontWeight: 600 }}>{r.why}</div>
-            {r.quote && <div className="small" style={{ fontStyle: "italic", color: "var(--ink-2)" }}>“{r.quote}”</div>}
-            <div className="muted small">
-              {r.source}{r.date ? ` · ${r.date}` : ""}{r.place && r.place !== picked.place ? ` · in ${r.place}` : ""} · {r.points} points
-              {r.old ? " · counts less (old)" : ""}
-            </div>
-            {r.alert_id && <Link className="small" to={`/disasters?id=${r.alert_id}`}>Open the alert</Link>}
-            {r.url && <a className="small" href={r.url} target="_blank" rel="noreferrer">Open the source</a>}
-            {r.report_id && <>{r.url ? " · " : ""}<Link className="small" to={`/reports?id=${r.report_id}`}>Open in the report library</Link></>}
-          </li>
-        ))}
-      </ul>
-      <p className="muted small" style={{ margin: 0 }}>Score = the strongest reason, plus 5 for each other strong one. 80+ urgent, 55+ high, 30+ some. Data over a year old counts less; over 2 years old is not used.</p>
+      {first && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div className="kpi-label">Main reason</div>
+          <ReasonCard r={first} place={picked.place} main />
+        </div>
+      )}
+      {rest.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div className="kpi-label">{rest.length === 1 ? "Another reason" : `${rest.length} more reasons`}</div>
+          {rest.map((r, i) => <ReasonCard key={i} r={r} place={picked.place} main={false} />)}
+        </div>
+      )}
+      <details className="small" style={{ color: "var(--muted)" }}>
+        <summary style={{ cursor: "pointer" }}>How do we decide the level?</summary>
+        <ul style={{ margin: "6px 0 0", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 3 }}>
+          <li>Each reason gets points for how serious it is.</li>
+          <li>The strongest reason counts in full. Every other strong reason adds 5 points.</li>
+          <li>80 or more is urgent, 55 to 79 is high, 30 to 54 is some. This one has {picked.need.score}.</li>
+          <li>Information over a year old counts less. Over 2 years old is not used.</li>
+          <li>Urgent needs a very serious reason (a severe disaster, or a food crisis for 30% of people or more), or several reasons together.</li>
+        </ul>
+      </details>
     </>
   );
 }

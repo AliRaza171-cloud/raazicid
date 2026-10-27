@@ -10,13 +10,14 @@ strong signal). Signals:
   Open requests at a distribution point    40, or 60 if 50+ items asked for
   People in need (OCHA, by sector)         share >=40% 85 · >=25% 65 · >=10% 45; or 500k+ 75 · 100k+ 60 · 20k+ 40
   Rainfall vs long-term average (3 months) +100% 50 · +60% 40 (flood risk) · -60% 50 · -40% 35 (drought risk)
-  Displaced people living here (IOM DTM)   100k+ 80 · 20k+ 65 · 5k+ 50 · 1k+ 35  (relief, rations, food, hygiene, blankets, household)
+  Displaced people living here (IOM DTM)   100k+ 70 · 20k+ 60 · 5k+ 45 · 1k+ 30  (relief, rations, food, hygiene, blankets, household;
+                                           alone it reaches "high": "urgent" needs a second source)
   AI web scan of the last 90 days          urgent 70 · high 55 · some 35 (with its source link)
   Report reader (needs stated in library   same points, with the report title, page and quote
   reports: ReliefWeb, uploads, links)      (+10 for both when no aid has reached the people yet)
 
 Data more than a year old counts 0.75 (poverty, which changes slowly, keeps 0.75) and its reason says
-"(old data, 2025)". Data older than NEED_DATA_MAX_YEARS (default 2) is not used at all.
+"(old_year: 2025, shown as "old" in the admin)". Data older than NEED_DATA_MAX_YEARS (default 2) is not used at all.
 
 Long-term deprivation tables (PSLM, HIES, DTM sheets an admin uploads, stored as "dep:*") never change the level:
 they are shown on their own, see services/deprivation.py.
@@ -118,7 +119,7 @@ IDP_CATEGORIES = ["emergency_relief", "grocery_ration", "food", "hygiene", "blan
 
 def score_idps(people: float) -> int:
     """Displaced people living in a place (IOM DTM)."""
-    return 80 if people >= 100_000 else 65 if people >= 20_000 else 50 if people >= 5_000 else 35 if people >= 1_000 else 0
+    return 70 if people >= 100_000 else 60 if people >= 20_000 else 45 if people >= 5_000 else 30 if people >= 1_000 else 0
 
 
 SLOW_CHANGING = {"poverty_headcount"}
@@ -127,6 +128,19 @@ AI_POINTS = {3: 70, 2: 55, 1: 35}   # AI web scan alone can reach "high"; "urgen
 
 def score_ai(level: float) -> int:
     return AI_POINTS.get(int(level), 0)
+
+
+def freshness(period_end: Optional[date], today: Optional[date] = None) -> str:
+    """'new' (last 3 months), 'recent' (this year) or 'old' (over a year). Alerts and requests are always new."""
+    if period_end is None:
+        return "new"
+    days = ((today or datetime.now(timezone.utc).date()) - period_end).days
+    return "new" if days <= 92 else "recent" if days <= 366 else "old"
+
+
+def strength(points: float) -> str:
+    """How much one reason weighs, in words: 'very strong' alone makes a need urgent, 'strong' high, 'medium' some."""
+    return "very strong" if points >= 80 else "strong" if points >= 55 else "medium" if points >= 30 else "weak"
 
 
 def too_old(period_end: Optional[date], today: Optional[date] = None) -> bool:
@@ -202,13 +216,14 @@ def recompute(db: Session) -> int:
     names = {l.id: l.name for l in db.scalars(select(Location))}
     sig: dict[tuple[uuid.UUID, int], list[tuple[int, dict]]] = defaultdict(list)
 
-    age = {"factor": 1.0, "old": None}   # set per indicator: older data counts less
+    age = {"factor": 1.0, "old": None, "end": None}   # set per indicator: older data counts less
 
     def add(loc: uuid.UUID, slug: str, pts: int, reason: dict, adjust: int = 0):
         pts = round((pts + adjust) * age["factor"])
         if slug in ids and pts > 0:
+            reason = {**reason, "fresh": freshness(age["end"]), "strength": strength(pts)}
             if age["old"]:
-                reason = {**reason, "why": f"{reason['why']} (old data, {age['old']})", "old": True}
+                reason.update(old=True, old_year=age["old"])
             sig[(loc, ids[slug])].append((pts, reason))
 
     archived = set(db.scalars(select(Report.id).where(Report.status == ReportStatus.archived)))
@@ -219,6 +234,7 @@ def recompute(db: Session) -> int:
             continue   # e.g. the 2018 poverty survey: too old to say what people need today
         when = ind.period_end.strftime("%b %Y") if ind.period_end else None
         age["factor"], age["old"] = age_factor(ind.period_end)
+        age["end"] = ind.period_end
         if ind.indicator in SLOW_CHANGING:
             age["factor"] = max(age["factor"], 0.75)   # poverty changes over years, not months
         if ind.indicator == "report_need":
@@ -226,7 +242,7 @@ def recompute(db: Session) -> int:
             if ind.report_id in archived or not shows_gap(meta.get("why") or "", meta.get("unmet") or ""):
                 continue
             reached = meta.get("reached") or "unknown"
-            why = (meta.get("why") or "Reported need") + {"none": " No aid has reached them yet.",
+            why = (meta.get("why") or "Reported need").rstrip(".") + "." + {"none": " No aid has reached them yet.",
                                                           "partial": " Some aid has arrived, not enough."}.get(reached, "")
             page = f", page {meta['page']}" if meta.get("page") else ""
             r = {"why": why, "source": f"Report · {meta.get('title') or 'report'}{page}"[:160], "quote": meta.get("unmet") or None,
@@ -253,13 +269,17 @@ def recompute(db: Session) -> int:
             add(ind.location_id, ids_to_slug.get(ind.category_id, ""), score_ai(ind.value) + (10 if reached == "none" else 0), r)
             continue
         if ind.indicator == "ipc_phase3plus_share":
-            r = {"why": f"IPC Phase 3+ (crisis or worse) for {ind.value:.0%} of people", "source": "IPC via HDX", "date": when}
+            people = (ind.meta or {}).get("people")
+            count = f" (about {int(people):,} people)" if people else ""
+            r = {"why": f"{ind.value:.0%} of people do not have enough food{count}. This is the IPC 'crisis' level or worse.",
+                 "source": "IPC food security data (via HDX)", "date": when}
             add(ind.location_id, "food", score_ipc(ind.value), r)
             add(ind.location_id, "grocery_ration", score_ipc(ind.value), r)
         elif ind.indicator == "price_change_3m":
             meta = ind.meta or {}
-            r = {"why": f"{meta.get('commodity', 'Staple')} price up {ind.value:.0%} in 3 months ({meta.get('market', '')})".replace(" ()", ""),
-                 "source": "WFP food prices via HDX", "date": when}
+            market = f" at {meta['market']} market" if meta.get("market") else ""
+            r = {"why": f"The price of {str(meta.get('commodity') or 'basic food').lower()} went up {ind.value:.0%} in 3 months{market}. "
+                        "Families can buy less.", "source": "WFP market prices (via HDX)", "date": when}
             add(ind.location_id, "grocery_ration", score_price(ind.value), r)
             add(ind.location_id, "food", score_price(ind.value), r, adjust=-10)
         elif ind.indicator == "people_in_need":
@@ -267,30 +287,33 @@ def recompute(db: Session) -> int:
             share = meta.get("share")
             pts = score_pin(ind.value, share)
             sector = meta.get("sector") or "all sectors"
-            people = f"{int(ind.value):,} people" + (f" ({share:.0%})" if share else "")
-            r = {"why": f"{people} in need of {sector} help", "source": "OCHA people in need via HDX", "date": when}
+            people = f"{int(ind.value):,} people" + (f" ({share:.0%} of everyone here)" if share else "")
+            r = {"why": f"{people} need help with {sector.lower()}, says the UN.", "source": "UN people-in-need count (OCHA, via HDX)",
+                 "date": when}
             for slug in sector_categories(sector):
                 add(ind.location_id, slug, pts, r)
         elif ind.indicator == "rainfall_anomaly_pct":
             pts, kind = score_rain(ind.value)
             if kind:
-                word = "more" if kind == "wet" else "less"
-                r = {"why": f"Rain {abs(ind.value):.0f}% {word} than normal over 3 months ({'flood' if kind == 'wet' else 'drought'} risk)",
-                     "source": "WFP rainfall via HDX", "date": when}
+                word, risk = ("more", "Floods may happen.") if kind == "wet" else ("less", "Crops and water may run short (drought).")
+                r = {"why": f"It rained {abs(ind.value):.0f}% {word} than normal in the last 3 months. {risk}",
+                     "source": "WFP rainfall data (via HDX)", "date": when}
                 for slug in RAIN_CATEGORIES[kind]:
                     add(ind.location_id, slug, pts, r)
         elif ind.indicator == "idps_present":
             meta = ind.meta or {}
             ops = ", ".join(meta.get("operations") or []) or "DTM"
-            r = {"why": f"{int(ind.value):,} displaced people living here ({ops})", "source": "IOM DTM via HDX", "date": when}
+            r = {"why": f"{int(ind.value):,} people who had to leave their homes live here ({ops}).",
+                 "source": "IOM displacement data (DTM, via HDX)", "date": when}
             for slug in IDP_CATEGORIES:
                 add(ind.location_id, slug, score_idps(ind.value), r)
         elif ind.indicator == "poverty_headcount":
-            r = {"why": f"{ind.value:.0%} of people multidimensionally poor", "source": "Poverty rate via HDX", "date": when}
+            r = {"why": f"{ind.value:.0%} of people are poor (short of money, schooling or health care).",
+                 "source": "Poverty survey (via HDX)", "date": when}
             for slug in ("grocery_ration", "food", "clothes", "school_supplies", "hygiene"):
                 add(ind.location_id, slug, score_poverty(ind.value), r)
 
-    age["factor"], age["old"] = 1.0, None   # alerts and requests are always recent
+    age["factor"], age["old"], age["end"] = 1.0, None, None   # alerts and requests are always recent
     since = datetime.now(timezone.utc) - timedelta(days=30)
     alerts = db.scalars(select(DisasterAlert).where(DisasterAlert.status.in_([AlertStatus.confirmed, AlertStatus.unconfirmed]),
                                                     DisasterAlert.created_at >= since))
@@ -311,7 +334,7 @@ def recompute(db: Session) -> int:
         reqs[k][1] += 1
         reqs[k][2] = point.name
     for (loc, cid), (qty, n, pname) in reqs.items():
-        r = {"why": f"People at {pname} asked for {qty}", "source": "Distribution point requests", "date": None}
+        r = {"why": f"People at our point {pname} asked for {qty} of these.", "source": "Request at our distribution point", "date": None}
         add(loc, by_id.get(cid, ""), score_requests(qty), r)
 
     db.execute(delete(NeedLevel))

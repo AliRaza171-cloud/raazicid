@@ -349,6 +349,9 @@ export interface NeedReason {
   alert_id?: string;
   url?: string | null;   // source link (AI web scan)
   old?: boolean;         // data more than a year old (counts less)
+  old_year?: number | null;
+  fresh?: "new" | "recent" | "old";                        // last 3 months / this year / over a year
+  strength?: "very strong" | "strong" | "medium" | "weak"; // how much this reason weighs
   quote?: string | null; // AI web scan / report reader: the source's words that show the gap
   report_id?: string | null; // report reader: the library report
   reached?: "none" | "partial" | "unknown";

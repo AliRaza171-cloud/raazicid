@@ -277,7 +277,7 @@ of 25+. 80+ urgent (3), 55+ high (2), 30+ some (1).
 | Open requests at a distribution point | our points | 40, or 60 if 50+ items |
 | People in need, by sector (education → school supplies and books, health / WASH → hygiene, shelter → blankets, household and winter items, food → food and rations…) | OCHA via HDX HAPI `affected-people/humanitarian-needs` | share ≥40% 85 · ≥25% 65 · ≥10% 45; or 500k+ 75 · 100k+ 60 · 20k+ 40 |
 | Rainfall over 3 months vs the long-term average | WFP / CHIRPS via HDX HAPI `climate/rainfall` | +100% 50 · +60% 40 (flood risk: relief, hygiene, household, blankets) · −60% 50 · −40% 35 (drought risk: food, rations, hygiene) |
-| Displaced people living in the place (relief, rations, food, hygiene, blankets, household) | IOM DTM via HDX HAPI `affected-people/idps` (each operation's latest round) | 100k+ 80 · 20k+ 65 · 5k+ 50 · 1k+ 35 |
+| Displaced people living in the place (relief, rations, food, hygiene, blankets, household) | IOM DTM via HDX HAPI `affected-people/idps` (each operation's latest round) | 100k+ 70 · 20k+ 60 · 5k+ 45 · 1k+ 30 (alone: high at most) |
 
 **Who works where (OCHA 3W, HDX HAPI `coordination-context/operational-presence`).** Each place in `/needs` also
 has `orgs`, `who_works` (sector → organisations) and `neglected`: the categories in high or urgent need there with
@@ -286,6 +286,8 @@ exist for Pakistan as a whole only, so they are saved as a short report in the l
 HAPI does not publish every subject for every country; the HDX source status names what was missing.
 
 A place shows the highest level found anywhere inside it.
+
+**Reasons in plain words.** Each reason's `why` is a short everyday sentence ("30% of people do not have enough food", "It rained 122% more than normal in the last 3 months. Floods may happen."). It also has `fresh` (`new` = last 3 months, `recent` = last 12 months, `old` = over a year, counts less), `strength` (`very strong` 80+, `strong` 55+, `medium` 30+, `weak`), and `old_year` when the data is over a year old.
 
 **Report reader.** Every report in the library (ReliefWeb, uploads, saved links) is read once by the AI for
 unmet needs per district: same rules as the web scan (a quote that shows the gap, who has been reached), plus the page
