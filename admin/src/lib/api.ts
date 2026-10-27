@@ -363,6 +363,22 @@ export interface AreaNeed {
   reasons: NeedReason[];
 }
 
+export interface DepValue {
+  value: number;
+  display: string;
+  band: "high" | "moderate" | "lower" | null;
+  places: number;
+  source: string;
+  year: number | null;
+}
+
+export interface Deprivation {
+  measures: { measure: string; label: string; share: boolean; categories: string[]; sources: string[] }[];
+  rows: { id: string; name: string; level: LocationItem["level"]; values: Record<string, DepValue>; high: number }[];
+  here: Record<string, DepValue> | null;
+  tables: { measure: string; label: string; hint: string; share: boolean; rows: number; source: string | null; year: number | null }[];
+}
+
 export interface AreaRow {
   id: string;
   name: string;
@@ -513,7 +529,7 @@ export interface FinderAnswer {
   areas: FinderArea[];
   confidence: "low" | "medium" | "high";
   sources: FinderSource[];
-  facts: { id: string; location_id: string; place: string; category: string; level: string; score: number; why: string; kind?: "3w"; text?: string }[];
+  facts: { id: string; location_id: string; place: string; category: string; level: string; score: number; why: string; kind?: "3w" | "dep"; text?: string }[];
   reliefweb_checked?: boolean;
   reliefweb_found?: number;
   web_results: { url: string; title: string; snippet: string; cited: boolean; age?: string }[];

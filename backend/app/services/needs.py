@@ -10,12 +10,16 @@ strong signal). Signals:
   Open requests at a distribution point    40, or 60 if 50+ items asked for
   People in need (OCHA, by sector)         share >=40% 85 · >=25% 65 · >=10% 45; or 500k+ 75 · 100k+ 60 · 20k+ 40
   Rainfall vs long-term average (3 months) +100% 50 · +60% 40 (flood risk) · -60% 50 · -40% 35 (drought risk)
+  Displaced people living here (IOM DTM)   100k+ 80 · 20k+ 65 · 5k+ 50 · 1k+ 35  (relief, rations, food, hygiene, blankets, household)
   AI web scan of the last 90 days          urgent 70 · high 55 · some 35 (with its source link)
   Report reader (needs stated in library   same points, with the report title, page and quote
   reports: ReliefWeb, uploads, links)      (+10 for both when no aid has reached the people yet)
 
 Data more than a year old counts 0.75 (poverty, which changes slowly, keeps 0.75) and its reason says
 "(old data, 2025)". Data older than NEED_DATA_MAX_YEARS (default 2) is not used at all.
+
+Long-term deprivation tables (PSLM, HIES, DTM sheets an admin uploads, stored as "dep:*") never change the level:
+they are shown on their own, see services/deprivation.py.
 
 3W (who works where, OCHA) does not change the level: it marks a place "neglected" for a category when the need
 is high or urgent and no organisation works on it there.
@@ -109,6 +113,14 @@ def score_rain(anomaly_pct: float) -> tuple[int, Optional[str]]:
 
 
 # Measures that change slowly: old figures still say a lot, so they lose at most a quarter of their weight
+IDP_CATEGORIES = ["emergency_relief", "grocery_ration", "food", "hygiene", "blankets", "household"]
+
+
+def score_idps(people: float) -> int:
+    """Displaced people living in a place (IOM DTM)."""
+    return 80 if people >= 100_000 else 65 if people >= 20_000 else 50 if people >= 5_000 else 35 if people >= 1_000 else 0
+
+
 SLOW_CHANGING = {"poverty_headcount"}
 AI_POINTS = {3: 70, 2: 55, 1: 35}   # AI web scan alone can reach "high"; "urgent" needs a second source
 
@@ -201,8 +213,8 @@ def recompute(db: Session) -> int:
 
     archived = set(db.scalars(select(Report.id).where(Report.status == ReportStatus.archived)))
     for ind in db.scalars(select(NeedIndicator)):
-        if ind.indicator == "orgs_present":
-            continue   # who works where: not a need signal
+        if ind.indicator == "orgs_present" or ind.indicator.startswith("dep:"):
+            continue   # who works where, and long-term deprivation tables: not need signals
         if too_old(ind.period_end):
             continue   # e.g. the 2018 poverty survey: too old to say what people need today
         when = ind.period_end.strftime("%b %Y") if ind.period_end else None
@@ -267,6 +279,12 @@ def recompute(db: Session) -> int:
                      "source": "WFP rainfall via HDX", "date": when}
                 for slug in RAIN_CATEGORIES[kind]:
                     add(ind.location_id, slug, pts, r)
+        elif ind.indicator == "idps_present":
+            meta = ind.meta or {}
+            ops = ", ".join(meta.get("operations") or []) or "DTM"
+            r = {"why": f"{int(ind.value):,} displaced people living here ({ops})", "source": "IOM DTM via HDX", "date": when}
+            for slug in IDP_CATEGORIES:
+                add(ind.location_id, slug, score_idps(ind.value), r)
         elif ind.indicator == "poverty_headcount":
             r = {"why": f"{ind.value:.0%} of people multidimensionally poor", "source": "Poverty rate via HDX", "date": when}
             for slug in ("grocery_ration", "food", "clothes", "school_supplies", "hygiene"):

@@ -5,6 +5,8 @@
   Humanitarian needs (OCHA response plans): people in need per district and sector. A need signal.
   Rainfall (WFP / CHIRPS): 3-month rainfall against the long-term average per district. Flood / drought risk.
   Refugees (UNHCR): national totals only (HAPI has no district breakdown). A fact for the need finder.
+  Displaced people (IOM DTM): internally displaced people per district from DTM's assessments. A need signal
+       while recent; older figures (Pakistan's are from the 2022 floods) show in the long-term deprivation layer.
 
 HAPI does not have every subject for every country: whatever is missing for Pakistan is skipped and named in
 the source status ("Humanitarian needs: none published for Pakistan").
@@ -174,6 +176,47 @@ def refugees(rows: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
     return {"period_end": latest, "groups": dict(groups), "origins": sorted(origins.items(), key=lambda x: -x[1])[:5]}
 
 
+def displacement(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Displaced people per place from IOM DTM: each operation's latest round, at the most detailed admin level it
+    reports, summed per place (rows split by origin or assessment type add up)."""
+    latest: dict[str, date] = {}
+    for r in rows:
+        end = _d(r.get("reference_period_end"))
+        op = str(r.get("operation") or "?")
+        if end and (op not in latest or end > latest[op]):
+            latest[op] = end
+    detail: dict[str, int] = {}   # per operation: 2 if its latest round has district rows, else 1
+    for r in rows:
+        op = str(r.get("operation") or "?")
+        if _d(r.get("reference_period_end")) == latest.get(op) and r.get("admin2_name"):
+            detail[op] = 2
+    places: dict[tuple, dict] = {}
+    for r in rows:
+        op = str(r.get("operation") or "?")
+        end = _d(r.get("reference_period_end"))
+        if end is None or end != latest.get(op) or not r.get("admin1_name"):
+            continue
+        if detail.get(op) == 2 and not r.get("admin2_name"):
+            continue   # the province total of an operation that also gives districts would count people twice
+        try:
+            people = int(float(r.get("population") or 0))
+        except (TypeError, ValueError):
+            continue
+        if people <= 0:
+            continue
+        key = _place(r) if detail.get(op) == 2 else (str(r["admin1_name"]), "", "")
+        a1, a2, code = key
+        row = places.setdefault(key, {"admin1_name": a1, "admin2_name": a2 or None, "admin2_code": code or None, "people": 0,
+                                      "operations": [], "round": None, "period_end": end,
+                                      "period_start": _d(r.get("reference_period_start"))})
+        row["people"] += people
+        if op not in row["operations"]:
+            row["operations"].append(op)
+        row["round"] = r.get("reporting_round") or row["round"]
+        row["period_end"] = max(row["period_end"], end)
+    return list(places.values())
+
+
 GROUP_NAMES = {"REF": "refugees", "ASY": "asylum-seekers", "ROC": "people in a refugee-like situation", "OIP": "others in need of protection",
                "STA": "stateless people", "IDP": "internally displaced people", "RET": "returned refugees", "OOC": "others of concern"}
 
@@ -193,7 +236,7 @@ def refugee_text(r: dict[str, Any]) -> str:
 
 def fetch_all(app_id: str, log: Callable[[str], None]) -> dict[str, Any]:
     """Everything above for Pakistan. A part that fails or has no data is left empty and noted in `log`."""
-    out: dict[str, Any] = {"presence": [], "pin": [], "rain": [], "refugees": None}
+    out: dict[str, Any] = {"presence": [], "pin": [], "rain": [], "refugees": None, "idps": []}
 
     def part(name: str, fn):
         try:
@@ -210,4 +253,5 @@ def fetch_all(app_id: str, log: Callable[[str], None]) -> dict[str, Any]:
                                                             aggregation_period="3-month", start_date=since))) or []
     out["refugees"] = part("refugees", lambda: refugees(get_all("affected-people/refugees-persons-of-concern", app_id, root=ROOT,
                                                                  pakistan=False, asylum_location_code="PAK")))
+    out["idps"] = part("displaced people (IOM DTM)", lambda: displacement(get_all("affected-people/idps", app_id, root=ROOT))) or []
     return out

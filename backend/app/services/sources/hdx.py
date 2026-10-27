@@ -181,6 +181,17 @@ def sync_un(db: Session, un: dict, source_id: int, places: list[Place]) -> list[
                              meta={"rainfall": r["rainfall"], "average": r["average"], "period": r["period"]}))
         n += 1
     parts.append(f"rainfall {n} districts" if n else "rainfall: none")
+    n, newest = 0, None
+    for r in un.get("idps") or []:
+        loc = _where(db, r, places)
+        if loc is None:
+            continue
+        db.add(NeedIndicator(location_id=loc.id, indicator="idps_present", value=r["people"], source_id=source_id,
+                             period_start=r["period_start"], period_end=r["period_end"],
+                             meta={"operations": r["operations"], "round": r["round"]}))
+        n += 1
+        newest = max(newest or r["period_end"], r["period_end"])
+    parts.append(f"displaced people (IOM DTM) {n} places, latest {newest:%b %Y}" if n else "displaced people (IOM DTM): none for Pakistan")
     return parts
 
 

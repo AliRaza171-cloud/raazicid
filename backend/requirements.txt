@@ -15,6 +15,7 @@ httpx>=0.28          # downloads donation photos for the classifier (Phase 5)
 pillow>=10.4         # reads photos for the classifier (Phase 5)
 apscheduler>=3.10,<4 # fetches disaster and need data on a schedule (Phase 6)
 pypdf>=5.0           # reads report PDFs for the RAG library (Phase 6)
+openpyxl>=3.1        # reads Excel survey tables (PSLM, HIES, IOM DTM) for the deprivation layer (Phase 6)
 
 # Tests
 pytest>=8.3

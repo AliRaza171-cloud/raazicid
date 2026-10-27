@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import (admin_donations, admin_riders, ai, alerts, appeals, auth, donations, health, me, needs, points, reference,
+from app.api.routes import (admin_donations, admin_riders, ai, alerts, appeals, auth, deprivation, donations, health, me, needs, points, reference,
                             reports, rider)
 from app.core.config import settings
 from app.scheduler import start as start_scheduler
@@ -51,6 +51,7 @@ app.include_router(needs.router, prefix=API_PREFIX)
 app.include_router(alerts.router, prefix=API_PREFIX)
 app.include_router(reports.router, prefix=API_PREFIX)
 app.include_router(appeals.router, prefix=API_PREFIX)
+app.include_router(deprivation.router, prefix=API_PREFIX)
 
 # Phase 3+: donations, points
 # Phase 4+: jobs, tracking, notifications

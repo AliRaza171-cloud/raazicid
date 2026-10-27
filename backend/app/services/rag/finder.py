@@ -164,6 +164,14 @@ def un_facts(db: Session, location_id: Optional[uuid.UUID], category_id: Optiona
     return out
 
 
+def dep_facts(db: Session, location_id: Optional[uuid.UUID], slugs: list[str], start: int) -> list[dict]:
+    """Long-term deprivation (PSLM, HIES, IOM DTM tables) as facts [Dn], clearly marked as years-old background."""
+    from app.services.deprivation import facts_for
+    return [{"id": f"D{start + i}", "location_id": str(location_id) if location_id else "", "place": "",
+             "category": "Long-term deprivation", "level": "", "score": 0, "kind": "dep", "text": t, "why": ""}
+            for i, t in enumerate(facts_for(db, location_id, slugs))]
+
+
 def reliefweb_lookup(db: Session, query: str) -> int:
     """Add the most relevant recent ReliefWeb reports for this question to the library (when the appname is set).
     Returns how many were new. Never fails the question."""
@@ -195,11 +203,14 @@ def build_prompt(question: str, place: Optional[str], category: Optional[str], h
         parts.append("(no matching passages in the library)")
     parts.append("\n## RAAZICID need levels (from IPC, food prices, poverty, OCHA people in need, rainfall, disaster alerts and "
                  "point requests) and who already works where (OCHA 3W). A place with high need and no organisation working "
-                 "on it is a gap RAAZICID could fill: say so when it applies.")
+                 "on it is a gap RAAZICID could fill: say so when it applies. Long-term deprivation facts come from surveys a few "
+                 "years old (PSLM, HIES, IOM DTM): use them to explain lasting need, never as proof of a need this month.")
     if facts:
         for f in facts:
             if f.get("kind") == "3w":
                 parts.append(f"[{f['id']}] {f['place']}: {f['text']}")
+            elif f.get("kind") == "dep":
+                parts.append(f"[{f['id']}] Long-term deprivation: {f['text']}")
             else:
                 parts.append(f"[{f['id']}] {f['place']}: {f['category']} need is {f['level']} (score {f['score']}). {f['why']}")
     else:
@@ -268,6 +279,7 @@ def find_needs(db: Session, question: str, location_id: Optional[uuid.UUID] = No
     db.commit()   # close the transaction left open by the login check: slow steps below must not hold one
     place = " › ".join(location_path(db, location_id)) if location_id else None
     cat = db.get(Category, category_id) if category_id else None
+    cat_slug = cat.slug if cat else None
     cat_name = cat.name if cat else None   # plain values: reading ORM objects after a commit would reopen a transaction
     query = " ".join(x for x in [question, cat_name or "", place.split(" › ")[-1] if place else ""] if x)
     # No category chosen: use the ones the question talks about, so "hygiene kits" gets hygiene data, not food
@@ -279,6 +291,7 @@ def find_needs(db: Session, question: str, location_id: Optional[uuid.UUID] = No
     hits = search(db, query, location_id, k=8, qvec=qvec)
     facts = need_facts(db, location_id, category_id, category_ids=guessed)
     facts += un_facts(db, location_id, category_id or (guessed[0] if len(guessed) == 1 else None), start=len(facts) + 1)
+    facts += dep_facts(db, location_id, [cat_slug] if cat_slug else slugs, start=len(facts) + 1)
     db.commit()   # Neon closes connections idle inside a transaction; Claude (with web search) can take minutes
 
     sources = [{"id": f"S{i}", "report_id": str(h.report_id), "chunk_id": str(h.chunk_id), "title": h.title,

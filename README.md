@@ -151,7 +151,18 @@ The AI then reads every library report for unmet needs; they show up in Needs by
 
 UN data from HDX HAPI (no extra setup, it comes with the daily HDX fetch): OCHA 3W (who works where), people in
 need by sector, rainfall anomalies and UNHCR refugee totals. Needs by area then shows "Who works here" and
-**Neglected places** (high need, nobody working on it).
+**Neglected places** (high need, nobody working on it). IOM DTM displacement figures also come through HDX:
+recent ones raise need levels; Pakistan's current DTM data (2022 floods) is older, so it shows in the deprivation layer.
+
+**Long-term deprivation** (PBS PSLM, HIES, IOM DTM): these surveys have no API, so download the tables and upload them
+on Needs by area → **Upload a table** (CSV or Excel). `pip install -r requirements.txt` once (adds openpyxl).
+- PSLM district tables (2019-20, latest district round): pbs.gov.pk → PSLM → District Level 2019-20 → statistical
+  tables (out-of-school children, literacy, water, sanitation, housing, electricity). Copy a table into Excel with a
+  District column and a number column; for literacy or access rates tick "the table gives the opposite".
+- HIES 2024-25 (provinces): the same subjects plus food insecurity (FIES).
+- IOM DTM sheets: data.humdata.org → search "Pakistan DTM" → download the Excel; type the column name, e.g.
+  "IDP Individuals".
+These figures are a few years old, so they are shown on their own and never change the need levels.
 
 ---
 

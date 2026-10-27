@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../components/Layout";
 import LiveMap, { type MapMarker } from "../components/LiveMap";
-import { api, type AreaNeed, type AreaNeeds, type AreaRow, type Category, type Point } from "../lib/api";
+import { api, type AreaNeed, type AreaNeeds, type AreaRow, type Category, type DepValue, type Deprivation, type Point } from "../lib/api";
 import { LEVELS, SHORT_CAT, ago, pointTypeLabel } from "../lib/format";
 
 const DOT = ["#9aa39e", "#d4a800", "#d9772b", "#a2361a"];
@@ -50,6 +50,12 @@ export default function NeedsMap() {
   }, [here.id]);
 
   useEffect(load, [load]);
+
+  const [dep, setDep] = useState<Deprivation | null>(null);   // long-term deprivation layer (survey tables)
+  const loadDep = useCallback(() => {
+    api<Deprivation>(here.id ? `/admin/deprivation?parent_id=${here.id}` : "/admin/deprivation").then(setDep).catch(() => setDep(null));
+  }, [here.id]);
+  useEffect(loadDep, [loadDep]);
   useEffect(() => {
     api<Category[]>("/categories").then(setCats).catch(() => undefined);
     // reload points when you come back to this tab (e.g. after adding one on the Points page)
@@ -289,7 +295,7 @@ export default function NeedsMap() {
             {picked ? (
               <Reasons picked={picked} />
             ) : row ? (
-              <PlacePanel row={row} categoryId={categoryId} levelOf={levelOf} nearest={nearestFor(row, categoryId ?? row.needs[0]?.category_id ?? null)}
+              <PlacePanel dep={dep?.rows.find((d) => d.id === row.id)?.values ?? null} depLabels={dep?.measures ?? []} row={row} categoryId={categoryId} levelOf={levelOf} nearest={nearestFor(row, categoryId ?? row.needs[0]?.category_id ?? null)}
                 gap={gaps.find((g) => g.row.id === row.id) ?? null}
                 onReason={(n) => setPicked({ place: row.name, need: n })} onOpen={() => open(row)} />
             ) : point ? (
@@ -299,6 +305,9 @@ export default function NeedsMap() {
             )}
           </aside>
         </div>
+
+        <DeprivationCard here={here.name} dep={dep} reload={loadDep}
+          onDetails={(id) => { setPicked(null); setFocusPoint(null); setFocusRow(id); }} />
 
         {data?.has_3w && (
           <section className="card" style={{ padding: 0 }}>
@@ -398,7 +407,9 @@ function Reasons({ picked }: { picked: Picked }) {
   );
 }
 
-function PlacePanel({ row, categoryId, levelOf, nearest, gap, onReason, onOpen }: {
+function PlacePanel({ row, categoryId, levelOf, nearest, gap, onReason, onOpen, dep, depLabels }: {
+  dep: Record<string, DepValue> | null;
+  depLabels: Deprivation["measures"];
   row: AreaRow;
   categoryId: number | null;
   levelOf: (r: AreaRow) => number;
@@ -442,6 +453,22 @@ function PlacePanel({ row, categoryId, levelOf, nearest, gap, onReason, onOpen }
         <div className="flash" style={{ background: "#f1ebfe", color: "#5b21b6", fontWeight: 600 }}>
           Neglected: high need for {row.neglected.join(", ").toLowerCase()}, but no UN agency or NGO works on it here.
           <div style={{ fontWeight: 500, marginTop: 4 }}>A good place for RAAZICID to help: few others are.</div>
+        </div>
+      )}
+      {dep && Object.keys(dep).length > 0 && (
+        <div>
+          <div className="kpi-label">Long-term deprivation (survey data, not this month's need)</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+            {depLabels.filter((m) => dep[m.measure]).map((m) => {
+              const v = dep[m.measure];
+              return (
+                <div key={m.measure} className="small">
+                  {m.label}: <strong>{v.display}</strong> <DepBand band={v.band} />
+                  <span className="muted"> · {v.source}{v.year ? ` ${v.year}` : ""}{v.places > 1 ? ` · ${v.places} districts` : ""}</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
       {Object.keys(row.who_works).length > 0 && (
@@ -512,5 +539,203 @@ function Summary({ here, data, onPick }: { here: Crumb; data: AreaNeeds | null; 
         recent evidence yet: run <strong>Update … with AI</strong> for that province.
       </p>
     </>
+  );
+}
+
+const DEP_SHORT: Record<string, string> = {
+  out_of_school: "Out of school", illiteracy: "Can't read", no_safe_water: "No safe water", no_toilet: "No toilet",
+  kutcha_housing: "Kutcha houses", no_electricity: "No electricity", food_insecurity: "Food insecure", displaced: "Displaced",
+};
+const BAND_STYLE: Record<string, { background: string; color: string }> = {
+  high: { background: "var(--urgent-bg)", color: "var(--urgent)" },
+  moderate: { background: "var(--warn-bg)", color: "var(--warn)" },
+};
+
+function DepBand({ band }: { band: DepValue["band"] }) {
+  if (band !== "high" && band !== "moderate") return null;
+  return <span className="chip" style={{ ...BAND_STYLE[band], height: 20, fontSize: 11 }}>{band === "high" ? "among the worst" : "above median"}</span>;
+}
+
+function DeprivationCard({ here, dep, reload, onDetails }: { here: string; dep: Deprivation | null; reload: () => void; onDetails: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [measure, setMeasure] = useState("out_of_school");
+  const [source, setSource] = useState("PSLM District 2019-20");
+  const [year, setYear] = useState("2020");
+  const [valueColumn, setValueColumn] = useState("");
+  const [placeColumn, setPlaceColumn] = useState("");
+  const [invert, setInvert] = useState(false);
+  const [addMissing, setAddMissing] = useState(true);
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!dep) return null;
+  const table = dep.tables.find((t) => t.measure === measure);
+  const loaded = dep.tables.filter((t) => t.rows > 0);
+
+  const upload = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!file) return setError("Choose a CSV or Excel file");
+    const form = new FormData();
+    form.append("file", file);
+    form.append("measure", measure);
+    form.append("source", source.trim() || "Uploaded table");
+    form.append("year", year);
+    form.append("value_column", valueColumn.trim());
+    form.append("place_column", placeColumn.trim());
+    form.append("invert", String(invert && !!table?.share));
+    form.append("add_missing", String(addMissing));
+    setBusy(true);
+    setError(null);
+    setMsg(null);
+    try {
+      const r = await api<{ matched: number; added_places: number; unmatched: string[]; unmatched_count: number; problems: string[];
+        used: { place: string; value: string; province: string | null } }>("/admin/deprivation/upload", { method: "POST", body: form });
+      setMsg(`${r.matched} places loaded (places from "${r.used.place}", numbers from "${r.used.value}"`
+        + `${r.used.province ? `, province from "${r.used.province}"` : ""})`
+        + (r.added_places ? `; ${r.added_places} new districts added` : "")
+        + (r.unmatched_count ? `; not recognised: ${r.unmatched.slice(0, 8).join(", ")}${r.unmatched_count > 8 ? "…" : ""}` : "")
+        + (r.problems.length ? `; skipped: ${r.problems.slice(0, 3).join("; ")}` : ""));
+      reload();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (m: string) => {
+    await api(`/admin/deprivation/${m}`, { method: "DELETE" }).catch(() => undefined);
+    reload();
+  };
+
+  const template = async () => {
+    const t = await api<{ filename: string; csv: string }>("/admin/deprivation/template");
+    const url = URL.createObjectURL(new Blob([t.csv], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = t.filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <section className="card" style={{ padding: 0 }}>
+      <div style={{ padding: "16px 18px 0", display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div style={{ marginRight: "auto", maxWidth: 760 }}>
+          <h2 style={{ margin: 0, fontSize: 16 }}>Long-term deprivation in {here} <span className="chip wait" style={{ marginLeft: 6 }}>Survey data</span></h2>
+          <p className="muted small" style={{ margin: "2px 0 0" }}>
+            Where people have lacked schooling, safe water, toilets, solid houses or food for years (PBS PSLM and HIES, IOM DTM).
+            These surveys are a few years old, so they never change the need levels above: use them to see where help is
+            useful for the long run. "Among the worst" = the worst quarter of places with that figure.
+          </p>
+        </div>
+        <button className="btn ghost small" onClick={() => setOpen(!open)}>{open ? "Close" : "Upload a table"}</button>
+      </div>
+
+      {open && (
+        <form onSubmit={upload} style={{ margin: "12px 18px", display: "flex", flexDirection: "column", gap: 10, background: "#fafbf9", border: "1px solid var(--line)", borderRadius: 12, padding: 12 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ flex: "2 1 260px" }}>
+              <label htmlFor="dmeasure">What the table measures</label>
+              <select id="dmeasure" className="select" style={{ width: "100%" }} value={measure} onChange={(e) => { setMeasure(e.target.value); setInvert(false); }}>
+                {dep.tables.map((t) => <option key={t.measure} value={t.measure}>{t.label}</option>)}
+              </select>
+              {table && <span className="muted small">{table.hint}</span>}
+            </div>
+            <div style={{ flex: "2 1 200px" }}>
+              <label htmlFor="dsource">Source</label>
+              <input id="dsource" className="input" value={source} onChange={(e) => setSource(e.target.value)} placeholder="PSLM District 2019-20" />
+            </div>
+            <div style={{ flex: "0 1 100px" }}>
+              <label htmlFor="dyear">Year</label>
+              <input id="dyear" className="input" inputMode="numeric" value={year} onChange={(e) => setYear(e.target.value.replace(/\D/g, ""))} />
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 200px" }}>
+              <label htmlFor="dvalue">Column with the numbers (optional)</label>
+              <input id="dvalue" className="input" value={valueColumn} onChange={(e) => setValueColumn(e.target.value)} placeholder="e.g. Total, IDP Individuals" />
+            </div>
+            <div style={{ flex: "1 1 200px" }}>
+              <label htmlFor="dplace">Column with place names (optional)</label>
+              <input id="dplace" className="input" value={placeColumn} onChange={(e) => setPlaceColumn(e.target.value)} placeholder="e.g. District, Admin 2" />
+            </div>
+          </div>
+          {table?.share && (
+            <label style={{ display: "flex", gap: 8, alignItems: "center", margin: 0, fontWeight: 500 }}>
+              <input type="checkbox" checked={invert} onChange={(e) => setInvert(e.target.checked)} />
+              The table gives the opposite (e.g. literacy rate, access to water or electricity): turn 60% into 40%
+            </label>
+          )}
+          <label style={{ display: "flex", gap: 8, alignItems: "center", margin: 0, fontWeight: 500 }}>
+            <input type="checkbox" checked={addMissing} onChange={(e) => setAddMissing(e.target.checked)} />
+            Add districts we don't have yet (needs a province column)
+          </label>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <input type="file" accept=".csv,.xlsx,text/csv" aria-label="CSV or Excel file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+            <button type="button" className="btn ghost small" onClick={template}>Download a template with our place names</button>
+          </div>
+          <span className="muted small">
+            CSV or Excel (first sheet). Title rows above the header are fine; rows named Total or Pakistan are skipped.
+            Shares can be 34, 34% or 0.34. A new table replaces the old one of the same kind.
+          </span>
+          {error && <div className="flash bad" role="alert">{error}</div>}
+          {msg && <div className="flash ok" role="status">{msg}</div>}
+          <button className="btn" type="submit" disabled={busy}>{busy ? "Loading…" : "Load table"}</button>
+        </form>
+      )}
+
+      {loaded.length > 0 && (
+        <div style={{ padding: "8px 18px 0", display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {loaded.map((t) => (
+            <span key={t.measure} className="chip wait" title={t.hint}>
+              {t.label}: {t.rows} places{t.source ? ` · ${t.source}` : ""}{t.year ? ` ${t.year}` : ""}
+              <button onClick={() => remove(t.measure)} aria-label={`Remove ${t.label}`} style={{ border: 0, background: "none", color: "inherit", cursor: "pointer", fontWeight: 800 }}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {dep.measures.length === 0 || dep.rows.length === 0 ? (
+        <p className="muted" style={{ padding: "10px 18px 16px", margin: 0 }}>
+          {dep.measures.length === 0
+            ? "No survey tables yet. Upload PSLM district tables (out-of-school children, literacy, water, toilets, housing, electricity), HIES 2024-25 province tables or IOM DTM sheets from HDX."
+            : `No survey figures for the places in ${here}.`}
+        </p>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Place</th>
+                {dep.measures.map((m) => <th key={m.measure} title={`${m.label} · ${m.sources.join("; ")}`}>{DEP_SHORT[m.measure] ?? m.label}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {dep.rows.map((r) => (
+                <tr key={r.id} className="click" onClick={() => onDetails(r.id)}>
+                  <td><strong>{r.name}</strong></td>
+                  {dep.measures.map((m) => {
+                    const v = r.values[m.measure];
+                    return (
+                      <td key={m.measure} title={v ? `${v.source}${v.year ? ` ${v.year}` : ""}${v.places > 1 ? ` · ${v.places} districts` : ""}` : "No figure"}
+                        style={v?.band && BAND_STYLE[v.band] ? { ...BAND_STYLE[v.band], fontWeight: 700 } : undefined}>
+                        {v ? v.display.replace(" (average)", "") : "–"}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="muted small" style={{ padding: "6px 18px 14px", margin: 0 }}>
+            Red: among the worst quarter of places · amber: above the median. Bigger places show the average of their districts.
+            Sources: {dep.measures.map((m) => `${DEP_SHORT[m.measure] ?? m.label}: ${m.sources.join(", ")}`).join(" · ")}
+          </p>
+        </div>
+      )}
+    </section>
   );
 }

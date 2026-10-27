@@ -277,6 +277,7 @@ of 25+. 80+ urgent (3), 55+ high (2), 30+ some (1).
 | Open requests at a distribution point | our points | 40, or 60 if 50+ items |
 | People in need, by sector (education → school supplies and books, health / WASH → hygiene, shelter → blankets, household and winter items, food → food and rations…) | OCHA via HDX HAPI `affected-people/humanitarian-needs` | share ≥40% 85 · ≥25% 65 · ≥10% 45; or 500k+ 75 · 100k+ 60 · 20k+ 40 |
 | Rainfall over 3 months vs the long-term average | WFP / CHIRPS via HDX HAPI `climate/rainfall` | +100% 50 · +60% 40 (flood risk: relief, hygiene, household, blankets) · −60% 50 · −40% 35 (drought risk: food, rations, hygiene) |
+| Displaced people living in the place (relief, rations, food, hygiene, blankets, household) | IOM DTM via HDX HAPI `affected-people/idps` (each operation's latest round) | 100k+ 80 · 20k+ 65 · 5k+ 50 · 1k+ 35 |
 
 **Who works where (OCHA 3W, HDX HAPI `coordination-context/operational-presence`).** Each place in `/needs` also
 has `orgs`, `who_works` (sector → organisations) and `neglected`: the categories in high or urgent need there with
@@ -323,6 +324,34 @@ left every 2 hours. Long reports are trimmed to the ~40,000 characters that talk
 Claude web scan (NDMA, PDMA, PMD, ReliefWeb, Dawn, Express Tribune, The News, Geo, ARY, APP; last 72 hours).
 Both create *unconfirmed* alerts with their source links; donors see an alert only after an admin confirms it.
 "What is needed" is suggested from the disaster type and the affected families (6 people per family).
+
+## Long-term deprivation layer [Phase 6C, built]
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | `/admin/deprivation?parent_id=` | admin | Per place inside `parent_id`: each loaded measure with value, band, source and year; `here` for the place itself; loaded tables |
+| POST | `/admin/deprivation/upload` | admin | Multipart: `file` (CSV or .xlsx, ≤5 MB), `measure`, `source`, `year`, optional `value_column`, `place_column`, `invert`, `add_missing` (default true) |
+| DELETE | `/admin/deprivation/{measure}` | admin | Remove one table |
+| GET | `/admin/deprivation/template` | admin | `{"filename", "csv"}`: province, place and an empty value for every province, city and district |
+
+Measures: `out_of_school`, `illiteracy`, `no_safe_water`, `no_toilet`, `kutcha_housing`, `no_electricity`,
+`food_insecurity` (shares) and `displaced` (people). Sources: PBS PSLM district survey (2019-20 is the latest district
+round), PBS HIES 2024-25 (provinces only), IOM DTM sheets on HDX. IOM DTM displacement from HDX HAPI also fills
+`displaced` where nothing was uploaded, whatever its age.
+
+- **Reading a table:** the header is the first row that names a place column and holds no numbers (title rows above
+  it are skipped). Place, province and number columns are found by name (District / Admin 2, Province / Admin 1,
+  Value / Total / Individuals…) or given. Rows called Total, Pakistan or Overall are skipped. `invert` turns a
+  "good" share (literacy rate, access to water) into the deprived share.
+- **Places:** names match our places ("Kech District" → Kech), inside the row's province when there is a province
+  column, including close spellings ("Kambar" / "Qambar"). With `add_missing`, an unknown district with a province
+  is added as a region under it. The response gives `matched`, `added_places`, `unmatched`, `problems` and the
+  columns `used`.
+- **Bands:** `high` for the worst quarter of places with that measure, `moderate` above the median, else `lower`
+  (`null` with fewer than 3 places). A larger place without its own figure shows the average of its districts
+  (people are summed).
+- Stored as `dep:<measure>` indicators. **They never change need levels.** The need finder gets the worst ones as
+  [D#] facts marked "long-term, not this month's need".
 
 ## Report library, RAG need finder, appeals [Phase 6B, built]
 
