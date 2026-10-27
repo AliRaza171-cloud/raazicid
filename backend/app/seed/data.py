@@ -65,7 +65,7 @@ SEASONAL_RULES = [
     ("School year start (August)", ["school_supplies", "books"], 8, 8, None, None, 2.0),
 ]
 
-# Approximate centre points (lat, lng), used for maps, alerts from GDACS and relief camps.
+# Approximate centre points (lat, lng), used for maps, alerts from GDACS and NGOs found by web search.
 PLACE_COORDS = {
     "Sindh": (25.9, 68.5), "Punjab": (31.2, 72.7), "Khyber Pakhtunkhwa": (34.6, 72.1), "Balochistan": (28.5, 65.5),
     "Islamabad Capital Territory": (33.69, 73.05), "Gilgit-Baltistan": (35.8, 74.98), "Azad Jammu and Kashmir": (33.9, 73.8),

@@ -13,8 +13,7 @@ const TABS: { key: DonationStatus | "all"; label: string }[] = [
   { key: "accepted", label: "Accepted" },
   { key: "rider_assigned", label: "Rider assigned" },
   { key: "picked_up", label: "Picked up" },
-  { key: "at_point", label: "At point" },
-  { key: "handed_out", label: "Handed out" },
+  { key: "delivered", label: "Delivered to NGO" },
   { key: "rejected", label: "Rejected" },
   { key: "cancelled", label: "Cancelled" },
   { key: "all", label: "All" },
@@ -81,7 +80,7 @@ export default function Donations() {
 
   return (
     <>
-      <PageHeader title="Donations" sub="Review new donations and send each one to a distribution point.">
+      <PageHeader title="Donations" sub="Review new donations and choose the NGO our rider will take each one to.">
         <form onSubmit={submitSearch} style={{ display: "flex", gap: 8 }}>
           <input className="input" style={{ width: 260 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search title, donor name or phone" aria-label="Search donations" />
           <button className="btn" type="submit">Search</button>

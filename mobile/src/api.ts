@@ -163,7 +163,7 @@ export interface RiderDoc {
 }
 
 export type DonationStatus =
-  | "in_review" | "accepted" | "rejected" | "rider_assigned" | "picked_up" | "at_point" | "handed_out" | "cancelled";
+  | "in_review" | "accepted" | "rejected" | "rider_assigned" | "picked_up" | "delivered" | "cancelled";
 
 export interface DonationListItem {
   id: string;
@@ -176,7 +176,7 @@ export interface DonationListItem {
   urgency_score: number | null;
   photo_url: string | null;
   pickup_area: string[];
-  point_name: string | null;
+  ngo_name: string | null;
   created_at: string;
 }
 
@@ -186,14 +186,13 @@ export interface Donation extends DonationListItem {
   food_type: "cooked" | "dry" | null;
   prepared_at: string | null;
   pickup: { address: string; lat: number; lng: number; location_path: string[]; from: string | null; to: string | null };
-  point: { id: string; name: string; address: string; location_path: string[] } | null;
+  ngo: { id: string; name: string; address: string; location_path: string[]; phone: string | null } | null;   // the NGO our rider drops it at
   reject_reason: string | null;
   photos: string[];
   history: { from_status: DonationStatus | null; to_status: DonationStatus; note: string | null; by_name: string | null; at: string }[];
   can_cancel: boolean;
   job: { id: string; status: JobStatus; rider_id: string; rider_name: string; rider_phone: string; vehicle: string; assigned_at: string } | null;
-  proofs: { kind: "pickup_proof" | "delivery_proof" | "distribution_proof"; url: string; lat: number | null; lng: number | null; distance_km: number | null; at: string }[];
-  hand_out: { quantity: number; families_served: number | null; photo_url: string | null; note: string | null; by_name: string; at: string } | null;
+  proofs: { kind: "pickup_proof" | "delivery_proof"; url: string; lat: number | null; lng: number | null; distance_km: number | null; at: string }[];
 }
 
 export type JobStatus = "assigned" | "accepted" | "declined" | "picked_up" | "delivered" | "cancelled";
@@ -206,6 +205,7 @@ export interface Place {
   area: string[];
   contact_name: string | null;
   contact_phone: string | null;
+  approx?: boolean;   // NGO office not on the map yet: call them for directions
 }
 
 export interface Job {
@@ -231,11 +231,10 @@ export interface Job {
   pickup: Place;
   pickup_from: string | null;
   pickup_to: string | null;
-  point: Place | null;
+  ngo: Place | null;          // where to drop it
   donor_name: string;
   donor_phone: string | null;
   trip_km: number | null;
-  can_hand_out: boolean;
 }
 
 export interface RiderSummary {
@@ -257,13 +256,13 @@ export interface Tracking {
   donation_status: DonationStatus;
   job_id: string | null;
   job_status: JobStatus | null;
-  heading_to: "pickup" | "point" | null;
+  heading_to: "pickup" | "ngo" | null;
   rider: { full_name: string; phone: string; vehicle_type: string; vehicle_number: string } | null;
   last: LatLngAt | null;
   path: LatLngAt[];
   stalled: boolean;
   pickup: Place;
-  point: Place | null;
+  ngo: Place | null;
 }
 
 // ---------- Phase 6: needs by area and disaster alerts ----------
@@ -316,7 +315,7 @@ export interface DisasterAlert {
   places: { id: string; name: string; path: string[] }[];
   needs: { category_id: number; name: string; quantity_needed: number | null; quantity_pledged: number }[];
   sources: { title: string; url: string | null; publisher: string | null }[];
-  camps: { id: string; name: string; is_active: boolean }[];
+  ngos: { id: string; name: string; city: string }[];   // NGOs our riders deliver to near the disaster
 }
 
 // ---------- Phase 6B: appeals and notifications ----------

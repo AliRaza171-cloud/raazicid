@@ -1,4 +1,4 @@
-"""Disaster alerts (Phase 6): list, confirm / dismiss, what is needed, open a relief camp; data sources status."""
+"""Disaster alerts (Phase 6): list, confirm / dismiss, what is needed, NGOs nearby; data sources status."""
 
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -14,13 +14,11 @@ from app.services import llm
 from app.core.deps import get_current_user, require_roles
 from app.core.errors import api_error
 from app.db.session import get_db
-from app.models import AlertNeed, Category, DisasterAlert, DistributionPoint, Location, Source, User
-from app.models.enums import AlertSeverity, AlertStatus, AlertType, PointType, Role, SourceKind
-from app.schemas.points import PointDetail
-from app.services.donations import point_out
-from app.services.geo import in_pakistan
-from app.services.locations import location_path
+from app.models import AlertNeed, Category, DisasterAlert, Location, Ngo, Source, User
+from app.models.enums import AlertSeverity, AlertStatus, AlertType, Role, SourceKind
+from app.services.locations import descendant_ids, location_path
 from app.services.needs import families, recompute, suggest_alert_needs
+from app.services.ngos import search_place
 from app.services.relief import recommend
 from app.services.sources.runner import run_source
 
@@ -81,7 +79,7 @@ class AlertOut(BaseModel):
     recommend_notes: list[str] = []          # season, time since the start, watch alerts
     families: Optional[int] = None           # affected families used for the quantities
     sources: list[AlertSource]
-    camps: list[dict]
+    ngos: list[dict] = []                    # NGOs we know in the alert's cities: where riders can take donations
 
 
 class AlertIn(BaseModel):
@@ -102,15 +100,6 @@ class NeedIn(BaseModel):
     quantity_needed: Optional[int] = Field(default=None, ge=0, le=10_000_000)
 
 
-class CampIn(BaseModel):
-    name: str = Field(min_length=2, max_length=120)
-    location_id: uuid.UUID
-    address: str = Field(min_length=3, max_length=500)
-    lat: float
-    lng: float
-    contact_name: Optional[str] = Field(default=None, max_length=120)
-    contact_phone: Optional[str] = None
-    open_days: int = Field(default=30, ge=1, le=365)
 
 
 # ---------- helpers ----------
@@ -119,7 +108,6 @@ def alert_out(db: Session, a: DisasterAlert) -> AlertOut:
     all_cats = list(db.scalars(select(Category)))
     cats = {c.id: c.name for c in all_cats}
     by_slug = {c.slug: c for c in all_cats}
-    camps = db.scalars(select(DistributionPoint).where(DistributionPoint.alert_id == a.id))
     fam = families(a.reported_figures or {})
     started = (a.started_at or a.created_at or datetime.now(timezone.utc)).date()
     advice, notes = recommend(a.type, a.severity, datetime.now(timezone.utc).date(), started, fam)
@@ -136,8 +124,23 @@ def alert_out(db: Session, a: DisasterAlert) -> AlertOut:
         needs=[AlertNeedOut(category_id=n.category_id, name=cats.get(n.category_id, "?"), quantity_needed=n.quantity_needed,
                             quantity_pledged=n.quantity_pledged) for n in sorted(a.needs, key=lambda n: n.category_id)],
         sources=[AlertSource(title=r.title, url=r.url, publisher=r.publisher, published_at=r.published_at) for r in a.reports],
-        camps=[{"id": str(p.id), "name": p.name, "is_active": p.is_active} for p in camps],
+        ngos=_ngos_near(db, a),
     )
+
+
+def _ngos_near(db: Session, a: DisasterAlert) -> list[dict]:
+    """NGOs in the cities of the alert's places (the alert may name a district or an area)."""
+    out, seen = [], set()
+    for loc in a.locations:
+        city = search_place(db, loc.id)
+        if city is None or city.id in seen:
+            continue
+        seen.add(city.id)
+        inside = descendant_ids(db, city.id)
+        for n in db.scalars(select(Ngo).where(Ngo.location_id.in_(inside), Ngo.is_active.is_(True)).order_by(Ngo.name)):
+            out.append({"id": str(n.id), "name": n.name, "city": city.name, "city_id": str(city.id), "phone": n.phone,
+                        "address": n.address})
+    return out
 
 
 def _get(db: Session, alert_id: uuid.UUID) -> DisasterAlert:
@@ -230,31 +233,6 @@ def set_needs(alert_id: uuid.UUID, body: list[NeedIn], _: User = Depends(admin_o
             a.needs.append(AlertNeed(category_id=cid, quantity_needed=n.quantity_needed))
     db.commit()
     return alert_out(db, a)
-
-
-@router.post("/admin/alerts/{alert_id}/camp", response_model=PointDetail, status_code=201)
-def open_camp(alert_id: uuid.UUID, body: CampIn, _: User = Depends(admin_only), db: Session = Depends(get_db)):
-    """Open a temporary relief camp for this disaster: a distribution point that takes what the alert needs."""
-    a = _get(db, alert_id)
-    if a.status not in (AlertStatus.confirmed, AlertStatus.unconfirmed):
-        raise api_error(409, "alert_closed", "This alert is closed")
-    if db.get(Location, body.location_id) is None:
-        raise api_error(422, "bad_location", "Choose the area from the list")
-    if not in_pakistan(body.lat, body.lng):
-        raise api_error(422, "bad_coordinates", "Coordinates must be in Pakistan (latitude first)")
-    cats = [db.get(Category, n.category_id) for n in a.needs]
-    p = DistributionPoint(name=" ".join(body.name.split()), type=PointType.relief_camp, location_id=body.location_id,
-                          address=body.address, lat=body.lat, lng=body.lng, contact_name=body.contact_name,
-                          contact_phone=body.contact_phone, same_day_food=True, is_active=True, alert_id=a.id,
-                          closes_at=datetime.now(timezone.utc) + timedelta(days=body.open_days))
-    p.categories = [c for c in cats if c]
-    db.add(p)
-    if a.status == AlertStatus.unconfirmed:
-        a.status = AlertStatus.confirmed
-        a.confirmed_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(p)
-    return PointDetail(**point_out(db, p).model_dump(), requests=[])
 
 
 # ---------- data sources ----------

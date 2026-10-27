@@ -1,4 +1,4 @@
-// Put a distribution point on the map: click the exact spot or drag the pin. Address search uses OpenStreetMap
+// Put an NGO office on the map: click the exact spot or drag the pin. Address search uses OpenStreetMap
 // Nominatim (free, no key; one search per button press). "Use my location" uses the browser's GPS.
 import { useEffect, useRef, useState } from "react";
 import { addBaseTiles, loadLeaflet } from "./LiveMap";

@@ -33,6 +33,8 @@ def engine():
     eng = create_engine(TEST_DB, pool_pre_ping=True)
     with eng.begin() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        # Tables from older versions (distribution points, hand-outs) would block dropping the ones they point to
+        conn.execute(text("DROP TABLE IF EXISTS hand_outs, point_requests, point_categories, distribution_points CASCADE"))
     Base.metadata.drop_all(eng)
     Base.metadata.create_all(eng)
     from app.seed.run import seed

@@ -1,4 +1,4 @@
-"""Phase 3 end-to-end checks: points, donations, accept / reject / cancel. Skipped without TEST_DATABASE_URL."""
+"""Phase 3 end-to-end checks: NGOs, donations, accept / reject / cancel. Skipped without TEST_DATABASE_URL."""
 
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -30,62 +30,71 @@ def donation_body(db, **extra) -> dict:
     }
 
 
-def make_point(client, admin_h, db, name="Noor Community Point", where="Lyari", **extra) -> dict:
-    body = {"name": name, "type": "mosque", "location_id": area(db, where), "address": "Near Chakiwara",
-            "lat": 24.866, "lng": 67.0, "contact_name": "Bilal", "contact_phone": "0300-1112223", **extra}
-    r = client.post(f"{API}/admin/points", headers=admin_h, json=body)
+def make_ngo(client, admin_h, db, name="Noor Welfare Trust", where="Lyari", **extra) -> dict:
+    body = {"name": name, "location_id": area(db, where), "address": "Near Chakiwara", "lat": 24.866, "lng": 67.0,
+            "phone": "021-111-222", **extra}
+    r = client.post(f"{API}/admin/ngos", headers=admin_h, json=body)
     assert r.status_code == 201, r.text
     return r.json()
 
 
-def test_points_crud_and_access(client, db):
+def test_ngos_crud_access_and_web_search(client, db, monkeypatch):
     admin_h = admin_headers(client, db)
-    p = make_point(client, admin_h, db, category_ids=[3, 4])
-    assert p["location_path"][-1] == "Lyari" and [c["id"] for c in p["categories"]] == [3, 4]
-    assert p["contact_phone"] == "03001112223"
+    n = make_ngo(client, admin_h, db, category_ids=[3, 4], website="noortrust.org")
+    assert n["location_path"][-1] == "Lyari" and [c["id"] for c in n["categories"]] == [3, 4]
+    assert n["found_by"] == "admin" and n["website"] == "https://noortrust.org" and not n["location_approx"]
 
     # Swapped coordinates are refused
-    bad = client.post(f"{API}/admin/points", headers=admin_h, json={**{k: p[k] for k in ("name", "type", "location_id", "address")}, "lat": 67.0, "lng": 24.86})
+    bad = client.post(f"{API}/admin/ngos", headers=admin_h, json={"name": "X", "location_id": n["location_id"],
+                                                                  "address": "Somewhere", "lat": 67.0, "lng": 24.86})
     assert bad.status_code == 422
 
-    # Karachi coordinates for a Hyderabad point are stopped, unless the admin says they are right
-    hyd = {"name": "Hyderabad Hall", "type": "community_centre", "location_id": area(db, "Hyderabad"), "address": "Latifabad",
-           "lat": 24.8607, "lng": 67.0011}
-    far = client.post(f"{API}/admin/points", headers=admin_h, json=hyd)
-    assert far.status_code == 422 and far.json()["detail"]["code"] == "coords_far" and "Hyderabad" in far.json()["detail"]["message"]
-    kept = client.post(f"{API}/admin/points", headers=admin_h, json={**hyd, "allow_far": True})
-    assert kept.status_code == 201 and "Hyderabad" in kept.json()["place_warning"]
-    fixed = client.patch(f"{API}/admin/points/{kept.json()['id']}", headers=admin_h, json={"lat": 25.39, "lng": 68.37})
-    assert fixed.status_code == 200 and fixed.json()["place_warning"] is None
-    assert p["place_warning"] is None
+    upd = client.patch(f"{API}/admin/ngos/{n['id']}", headers=admin_h, json={"takes_cooked_food": True, "category_ids": []})
+    assert upd.status_code == 200 and upd.json()["takes_cooked_food"] and upd.json()["categories"] == []
 
-    upd = client.patch(f"{API}/admin/points/{p['id']}", headers=admin_h, json={"same_day_food": True, "category_ids": []})
-    assert upd.status_code == 200 and upd.json()["same_day_food"] and upd.json()["categories"] == []
-
-    # Filter by city includes points in its areas
+    # Filter by city includes NGOs in its areas; hidden ones only on request
     karachi = area(db, "Karachi")
-    assert any(x["id"] == p["id"] for x in client.get(f"{API}/points", headers=admin_h, params={"location_id": karachi}).json())
+    assert any(x["id"] == n["id"] for x in client.get(f"{API}/admin/ngos", headers=admin_h, params={"location_id": karachi}).json())
+    hidden = make_ngo(client, admin_h, db, name="Closed Trust")
+    client.patch(f"{API}/admin/ngos/{hidden['id']}", headers=admin_h, json={"is_active": False})
+    assert all(x["id"] != hidden["id"] for x in client.get(f"{API}/admin/ngos", headers=admin_h).json())
+    assert any(x["id"] == hidden["id"] for x in client.get(f"{API}/admin/ngos", headers=admin_h, params={"include_hidden": True}).json())
 
-    # Donors and unapproved riders cannot see points
+    # Donors and riders cannot see the NGO list
     donor_h = auth(register(client).json()["access_token"])
-    assert client.get(f"{API}/points", headers=donor_h).status_code == 403
+    assert client.get(f"{API}/admin/ngos", headers=donor_h).status_code == 403
     rider_h = auth(register(client, role="rider").json()["access_token"])
-    assert client.get(f"{API}/points", headers=rider_h).status_code == 403
+    assert client.get(f"{API}/admin/ngos", headers=rider_h).status_code == 403
 
-    # Point requests
-    req = client.post(f"{API}/points/{p['id']}/requests", headers=admin_h, json={"category_id": 4, "quantity": 50, "note": "Cold nights"})
-    assert req.status_code == 201
-    detail = client.get(f"{API}/points/{p['id']}", headers=admin_h).json()
-    assert detail["open_requests"] == 1 and detail["requests"][0]["category"]["name"] == "Blankets"
-    done = client.patch(f"{API}/admin/point-requests/{req.json()['id']}", headers=admin_h, json={"status": "fulfilled"})
-    assert done.status_code == 200 and done.json()["status"] == "fulfilled"
+    # Web search for NGOs in Hyderabad (the AI and the map lookup are stand-ins: tests never call paid APIs)
+    from app.services import llm, ngo_finder
+    answer = """```json
+{"ngos": [{"name": "Hyderabad Welfare Trust", "address": "Latifabad Unit 7", "phone": "022-1234567",
+  "website": "hwt.org.pk", "accepts": ["clothes", "blankets", "spaceships"], "cooked_food": false,
+  "about": "Helps poor families.", "source_url": "https://hwt.org.pk/about"},
+ {"name": "Sindh Food Bank", "address": "", "accepts": ["food"], "cooked_food": true, "source_url": "https://x.pk"}]}
+```"""
+    monkeypatch.setattr(llm, "available", lambda: True)
+    monkeypatch.setattr(llm, "complete", lambda *a, **k: llm.Answer(text=answer, provider="openai", model="test"))
+    monkeypatch.setattr(ngo_finder, "geocode", lambda address, city, centre: (25.39, 68.37) if "Latifabad" in address else None)
+    r = client.post(f"{API}/admin/ngos/search", headers=admin_h, json={"location_id": area(db, "Hyderabad")})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["place"] == "Hyderabad" and body["found"] == 2 and body["added"] == 2
+    by = {x["name"]: x for x in body["ngos"]}
+    trust, bank = by["Hyderabad Welfare Trust"], by["Sindh Food Bank"]
+    assert trust["found_by"] == "web_search" and not trust["location_approx"] and [c["id"] for c in trust["categories"]] == [3, 4]
+    assert bank["location_approx"] and bank["takes_cooked_food"] and "call first" in bank["address"]
+    # Searching again does not add the same NGOs twice
+    again = client.post(f"{API}/admin/ngos/search", headers=admin_h, json={"location_id": area(db, "Hyderabad")}).json()
+    assert again["added"] == 0 and len([x for x in again["ngos"] if x["name"] == "Hyderabad Welfare Trust"]) == 1
 
 
 def test_donation_flow_accept(client, db):
     admin_h = admin_headers(client, db)
-    near = make_point(client, admin_h, db, name="Saddar Hall", where="Saddar", lat=24.856, lng=67.021)
-    far = make_point(client, admin_h, db, name="Lahore Hall", where="Lahore", lat=31.52, lng=74.35)
-    food_only = make_point(client, admin_h, db, name="Food Only", where="Saddar", category_ids=[1])
+    near = make_ngo(client, admin_h, db, name="Saddar Trust", where="Saddar", lat=24.856, lng=67.021)
+    far = make_ngo(client, admin_h, db, name="Lahore Trust", where="Lahore", lat=31.52, lng=74.35)
+    food_only = make_ngo(client, admin_h, db, name="Food Only", where="Saddar", category_ids=[1])
 
     donor = register(client).json()
     donor_h = auth(donor["access_token"])
@@ -106,18 +115,19 @@ def test_donation_flow_accept(client, db):
     mine = client.get(f"{API}/donations/mine", headers=donor_h, params={"filter": "active"}).json()
     assert mine["total"] == 1 and mine["items"][0]["id"] == d["id"]
 
-    # Admin sees it, options are ranked: same area first, food-only point left out
+    # Admin sees it, NGO options are ranked: same area first, the food-only NGO left out
     listed = client.get(f"{API}/admin/donations", headers=admin_h, params={"status": "in_review", "q": "blankets"}).json()
     assert any(i["id"] == d["id"] and i["donor_name"] == "Test User" for i in listed["items"])
-    opts = client.get(f"{API}/admin/donations/{d['id']}/point-options", headers=admin_h).json()
+    opts = client.get(f"{API}/admin/donations/{d['id']}/ngo-options", headers=admin_h).json()
     ids = [o["id"] for o in opts]
     assert ids.index(near["id"]) < ids.index(far["id"]) and food_only["id"] not in ids
     assert opts[0]["match"] == "same_area"
 
-    # Wrong point refused, right point accepted
-    assert client.post(f"{API}/admin/donations/{d['id']}/accept", headers=admin_h, json={"point_id": food_only["id"]}).status_code == 409
-    ok = client.post(f"{API}/admin/donations/{d['id']}/accept", headers=admin_h, json={"point_id": near["id"]})
-    assert ok.status_code == 200 and ok.json()["status"] == "accepted" and ok.json()["point"]["name"] == "Saddar Hall"
+    # Wrong NGO refused, right one accepted
+    assert client.post(f"{API}/admin/donations/{d['id']}/accept", headers=admin_h, json={"ngo_id": food_only["id"]}).status_code == 409
+    ok = client.post(f"{API}/admin/donations/{d['id']}/accept", headers=admin_h, json={"ngo_id": near["id"]})
+    assert ok.status_code == 200 and ok.json()["status"] == "accepted" and ok.json()["ngo"]["name"] == "Saddar Trust"
+    assert ok.json()["ngo_name"] == "Saddar Trust"
     assert ok.json()["history"][-1]["by_name"] == "Admin"
 
     # Donor was told; cannot reject an accepted donation; donor can still cancel
@@ -141,7 +151,7 @@ def test_food_urgency_reject_and_validation(client, db):
     r = client.post(f"{API}/donations", headers=donor_h, json=food)
     assert r.status_code == 201, r.text
     d = r.json()
-    # cooked 35 + 1-3 h 25 + 40 plates 14 (+ distance to the nearest food point, if any)
+    # cooked 35 + 1-3 h 25 + 40 plates 14 (+ distance to the nearest NGO for cooked food, if any)
     assert d["condition"] is None and [x["points"] for x in d["urgency_reasons"]][:3] == [35, 25, 14]
     assert d["urgency_score"] == min(100, sum(x["points"] for x in d["urgency_reasons"]))
 
@@ -149,9 +159,9 @@ def test_food_urgency_reject_and_validation(client, db):
     first = client.get(f"{API}/admin/donations", headers=admin_h, params={"sort": "urgency", "status": "in_review"}).json()["items"][0]
     assert first["urgency_score"] is not None
 
-    # Cooked food cannot go to a point without same-day food
-    no_food = make_point(client, admin_h, db, name="No Food Point", where="Saddar")
-    assert client.post(f"{API}/admin/donations/{d['id']}/accept", headers=admin_h, json={"point_id": no_food["id"]}).status_code == 409
+    # Cooked food cannot go to an NGO that does not take cooked food
+    no_food = make_ngo(client, admin_h, db, name="No Food Trust", where="Saddar")
+    assert client.post(f"{API}/admin/donations/{d['id']}/accept", headers=admin_h, json={"ngo_id": no_food["id"]}).status_code == 409
 
     rej = client.post(f"{API}/admin/donations/{d['id']}/reject", headers=admin_h, json={"reason": "Pickup too far for cooked food"})
     assert rej.status_code == 200 and rej.json()["status"] == "rejected"

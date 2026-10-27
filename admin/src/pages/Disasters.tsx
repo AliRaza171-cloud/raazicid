@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import AppealForm from "../components/AppealForm";
 import { PageHeader } from "../components/Layout";
 import LocationSelect from "../components/LocationSelect";
-import { api, type Alert, type AlertStatus, type Appeal, type Category, type DataSource } from "../lib/api";
+import { api, type Alert, type AlertStatus, type Appeal, type Category, type DataSource, type NgoSearch } from "../lib/api";
 import { ALERT_STATUS, ALERT_TYPES, FIGURES, SEVERITY, ago, date, dateTime } from "../lib/format";
 
 const TABS: { key: AlertStatus | "all"; label: string }[] = [
@@ -111,7 +111,7 @@ function AlertPanel({ id, cats, onClose, onChanged }: { id: string; cats: Catego
   const [a, setA] = useState<Alert | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [camp, setCamp] = useState(false);
+  const [finding, setFinding] = useState<string | null>(null);   // city being searched for NGOs
 
   useEffect(() => {
     api<Alert>(`/admin/alerts/${id}`).then(setA).catch((e) => setError(e.message));
@@ -211,26 +211,39 @@ function AlertPanel({ id, cats, onClose, onChanged }: { id: string; cats: Catego
       {a.status === "confirmed" && <Appeals alert={a} cats={cats} onSent={onChanged} />}
 
       <section style={{ borderTop: "1px solid var(--line)", paddingTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-        <h3 style={{ margin: 0, fontSize: 15 }}>Relief camps</h3>
-        {a.camps.length > 0 ? (
-          a.camps.map((c) => (
-            <div key={c.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <strong style={{ marginRight: "auto" }}>{c.name}</strong>
-              <span className={`chip ${c.is_active ? "ok" : "wait"}`}>{c.is_active ? "Open" : "Closed"}</span>
-              <Link className="small" to="/points">Manage</Link>
+        <div>
+          <h3 style={{ margin: 0, fontSize: 15 }}>NGOs near this disaster</h3>
+          <p className="muted small" style={{ margin: "2px 0 0" }}>Our riders take donations for this disaster to these NGOs, who give them to the affected families.</p>
+        </div>
+        {a.ngos.length > 0 ? (
+          a.ngos.map((n) => (
+            <div key={n.id} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+              <strong>{n.name}</strong>
+              <span className="muted small" style={{ marginRight: "auto" }}>{n.city}{n.phone ? ` · ${n.phone}` : ""}</span>
             </div>
           ))
         ) : (
-          <p className="muted small" style={{ margin: 0 }}>A relief camp is a temporary distribution point near the affected people. Riders deliver there and our team hands items out.</p>
+          <p className="muted small" style={{ margin: 0 }}>We know no NGO in these places yet.</p>
         )}
-        {open && !camp && <button className="btn ghost" onClick={() => setCamp(true)}>Open a relief camp</button>}
-        {open && camp && (
-          <CampForm alert={a} onCancel={() => setCamp(false)} onDone={(name) => {
-            setCamp(false);
-            api<Alert>(`/admin/alerts/${id}`).then(setA);
-            onChanged(`Opened ${name}. It now shows in distribution points.`);
-          }} />
-        )}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {a.places.slice(0, 3).map((pl) => (
+            <button key={pl.id} className="btn ghost small" disabled={finding !== null} onClick={async () => {
+              setFinding(pl.name);
+              try {
+                const r = await api<NgoSearch>("/admin/ngos/search", { method: "POST", body: JSON.stringify({ location_id: pl.id }) });
+                onChanged(r.status);
+                api<Alert>(`/admin/alerts/${id}`).then(setA);
+              } catch (e) {
+                setError((e as Error).message);
+              } finally {
+                setFinding(null);
+              }
+            }}>
+              {finding === pl.name ? `Searching near ${pl.name}… (1–3 min)` : `Find NGOs near ${pl.name} on the web`}
+            </button>
+          ))}
+          <Link className="btn ghost small" to="/ngos">All NGOs</Link>
+        </div>
       </section>
     </aside>
   );
@@ -403,84 +416,6 @@ function NeedsTable({ alert, cats, editable, onSaved }: { alert: Alert; cats: Ca
       )}
       {error && <div className="flash bad" role="alert">{error}</div>}
     </section>
-  );
-}
-
-function CampForm({ alert, onCancel, onDone }: { alert: Alert; onCancel: () => void; onDone: (name: string) => void }) {
-  const first = alert.places[0];
-  const [name, setName] = useState(first ? `${first.name} Relief Camp` : "");
-  const [locationId, setLocationId] = useState<string | null>(null);
-  const [address, setAddress] = useState("");
-  const [coords, setCoords] = useState(first?.lat != null && first.lng != null ? `${first.lat}, ${first.lng}` : "");
-  const [contactName, setContactName] = useState("");
-  const [contactPhone, setContactPhone] = useState("");
-  const [days, setDays] = useState("30");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    const m = coords.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
-    if (!m) return setError("Coordinates should look like 24.8607, 67.0011 (latitude, longitude)");
-    if (!locationId) return setError("Choose the area of the camp");
-    setBusy(true);
-    try {
-      await api(`/admin/alerts/${alert.id}/camp`, {
-        method: "POST",
-        body: JSON.stringify({
-          name: name.trim(), location_id: locationId, address: address.trim(), lat: parseFloat(m[1]), lng: parseFloat(m[2]),
-          contact_name: contactName.trim() || null, contact_phone: contactPhone.trim() || null, open_days: Number(days) || 30,
-        }),
-      });
-      onDone(name.trim());
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10, background: "#fafbf9", border: "1px solid var(--line)", borderRadius: 12, padding: 12 }}>
-      <div>
-        <label htmlFor="cname">Camp name</label>
-        <input id="cname" className="input" value={name} onChange={(e) => setName(e.target.value)} required minLength={2} />
-      </div>
-      <div>
-        <label>Area</label>
-        <LocationSelect allLabel="Choose" onChange={(id) => setLocationId(id)} />
-      </div>
-      <div>
-        <label htmlFor="caddr">Address</label>
-        <input id="caddr" className="input" value={address} onChange={(e) => setAddress(e.target.value)} required minLength={3} placeholder="Govt Boys School ground, main road" />
-      </div>
-      <div>
-        <label htmlFor="ccoords">Coordinates (latitude, longitude)</label>
-        <input id="ccoords" className="input" value={coords} onChange={(e) => setCoords(e.target.value)} required placeholder="34.7717, 72.3600" />
-        <span className="muted small">Filled with the centre of the place. Replace it with the exact camp spot from Google Maps.</span>
-      </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <div style={{ flex: "1 1 120px" }}>
-          <label htmlFor="ccn">Contact person</label>
-          <input id="ccn" className="input" value={contactName} onChange={(e) => setContactName(e.target.value)} />
-        </div>
-        <div style={{ flex: "1 1 120px" }}>
-          <label htmlFor="ccp">Contact phone</label>
-          <input id="ccp" className="input" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} placeholder="0300 1234567" />
-        </div>
-        <div style={{ flex: "0 1 90px" }}>
-          <label htmlFor="cdays">Open days</label>
-          <input id="cdays" className="input" inputMode="numeric" value={days} onChange={(e) => setDays(e.target.value.replace(/\D/g, ""))} />
-        </div>
-      </div>
-      <span className="muted small">The camp takes the categories in "What is needed" and can hand out cooked food the same day.</span>
-      {error && <div className="flash bad" role="alert">{error}</div>}
-      <div style={{ display: "flex", gap: 8 }}>
-        <button className="btn" type="submit" disabled={busy}>{busy ? "Opening…" : "Open camp"}</button>
-        <button className="btn ghost" type="button" onClick={onCancel}>Cancel</button>
-      </div>
-    </form>
   );
 }
 

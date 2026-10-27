@@ -120,7 +120,7 @@ export default function DonateScreen() {
       {presetFor ? (
         <View style={{ backgroundColor: colors.primarySoft, borderRadius: 12, padding: 12 }}>
           <Text style={{ color: colors.primaryDark, fontWeight: "700" }}>Needed: {presetFor}</Text>
-          <Text style={{ color: colors.ink2, fontSize: 12 }}>We send it to the distribution point that needs it most.</Text>
+          <Text style={{ color: colors.ink2, fontSize: 12 }}>Our rider takes it to a trusted NGO near you, who gives it to people in need.</Text>
         </View>
       ) : null}
       <Text style={st.h}>Photos</Text>

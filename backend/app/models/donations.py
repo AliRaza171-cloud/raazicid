@@ -1,4 +1,4 @@
-"""Donations, their photos, status history, hand-outs and ratings."""
+"""Donations, their photos, status history and ratings."""
 
 import uuid
 from datetime import datetime
@@ -45,7 +45,7 @@ class Donation(UUIDPk, Timestamps, Base):
         enum_col(DonationStatus), default=DonationStatus.in_review, index=True
     )
     reject_reason: Mapped[Optional[str]] = mapped_column(Text)
-    point_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("distribution_points.id"), index=True)
+    ngo_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("ngos.id"), index=True)   # where our rider drops it
     appeal_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("appeals.id"))   # donated in answer to an appeal
 
     images: Mapped[list["DonationImage"]] = relationship(back_populates="donation", cascade="all, delete-orphan")
@@ -80,20 +80,6 @@ class StatusChange(UUIDPk, Timestamps, Base):
     note: Mapped[Optional[str]] = mapped_column(Text)
 
     donation: Mapped[Donation] = relationship(back_populates="history")
-
-
-class HandOut(UUIDPk, Timestamps, Base):
-    """Our team handing items to families at a point (the final step)."""
-
-    __tablename__ = "hand_outs"
-
-    donation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("donations.id", ondelete="CASCADE"), index=True)
-    point_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("distribution_points.id"), index=True)
-    handed_out_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))   # rider or admin
-    quantity: Mapped[int] = mapped_column(Integer)
-    families_served: Mapped[Optional[int]] = mapped_column(Integer)
-    photo_url: Mapped[Optional[str]] = mapped_column(Text)
-    note: Mapped[Optional[str]] = mapped_column(Text)
 
 
 class Rating(UUIDPk, Timestamps, Base):

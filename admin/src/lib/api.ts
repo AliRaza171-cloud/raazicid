@@ -192,7 +192,7 @@ export interface AiStats {
 }
 
 export type DonationStatus =
-  | "in_review" | "accepted" | "rejected" | "rider_assigned" | "picked_up" | "at_point" | "handed_out" | "cancelled";
+  | "in_review" | "accepted" | "rejected" | "rider_assigned" | "picked_up" | "delivered" | "cancelled";
 
 export interface DonationItem {
   id: string;
@@ -205,7 +205,7 @@ export interface DonationItem {
   urgency_score: number | null;
   photo_url: string | null;
   pickup_area: string[];
-  point_name: string | null;
+  ngo_name: string | null;
   donor_name: string | null;
   created_at: string;
 }
@@ -216,8 +216,8 @@ export interface Donation extends DonationItem {
   food_type: "cooked" | "dry" | null;
   prepared_at: string | null;
   urgency_reasons: { label: string; points: number }[];
-  pickup: { address: string; lat: number; lng: number; location_path: string[]; from: string | null; to: string | null };
-  point: { id: string; name: string; address: string; location_path: string[]; lat: number; lng: number } | null;
+  pickup: { address: string; lat: number; lng: number; location_id: string | null; location_path: string[]; from: string | null; to: string | null };
+  ngo: { id: string; name: string; address: string; location_path: string[]; lat: number; lng: number; phone: string | null; location_approx: boolean } | null;
   reject_reason: string | null;
   photos: string[];
   history: { from_status: DonationStatus | null; to_status: DonationStatus; note: string | null; by_name: string | null; at: string }[];
@@ -225,8 +225,7 @@ export interface Donation extends DonationItem {
   ai: { category_id: number; confidence: number; top3: { category_id: number; p: number }[] } | null;
   can_cancel: boolean;
   job: { id: string; status: JobStatus; rider_id: string; rider_name: string; rider_phone: string; vehicle: string; assigned_at: string } | null;
-  proofs: { kind: "pickup_proof" | "delivery_proof" | "distribution_proof"; url: string; lat: number | null; lng: number | null; distance_km: number | null; at: string }[];
-  hand_out: { quantity: number; families_served: number | null; photo_url: string | null; note: string | null; by_name: string; at: string } | null;
+  proofs: { kind: "pickup_proof" | "delivery_proof"; url: string; lat: number | null; lng: number | null; distance_km: number | null; at: string }[];
 }
 
 export type JobStatus = "assigned" | "accepted" | "declined" | "picked_up" | "delivered" | "cancelled";
@@ -255,6 +254,7 @@ export interface Place {
   area: string[];
   contact_name: string | null;
   contact_phone: string | null;
+  approx?: boolean;   // NGO found on the web: only the city centre is known
 }
 
 export interface LatLngAt {
@@ -271,71 +271,68 @@ export interface TrackingItem {
   title: string;
   rider_name: string;
   rider_phone: string;
-  heading_to: "pickup" | "point";
+  heading_to: "pickup" | "ngo";
   last: LatLngAt | null;
   minutes_since_ping: number | null;
   stalled: boolean;
   pickup: Place;
-  point: Place | null;
+  ngo: Place | null;
 }
 
 export interface Tracking {
   job_status: JobStatus | null;
-  heading_to: "pickup" | "point" | null;
+  heading_to: "pickup" | "ngo" | null;
   last: LatLngAt | null;
   path: LatLngAt[];
   stalled: boolean;
   pickup: Place;
-  point: Place | null;
+  ngo: Place | null;
 }
 
-export interface PointOption {
+export interface NgoOption {
   id: string;
   name: string;
-  type: string;
+  address: string;
   location_path: string[];
   distance_km: number;
   match: "same_area" | "same_region" | "same_city" | "same_province" | "other";
-  same_day_food: boolean;
+  phone: string | null;
+  takes_cooked_food: boolean;
+  location_approx: boolean;
+  found_by: string;
+  source_url: string | null;
   items_30d: number;
 }
 
-export type PointType = "mosque" | "school" | "community_centre" | "relief_camp" | "other";
-
-export interface Point {
+export interface Ngo {
   id: string;
   name: string;
-  type: PointType;
   location_id: string;
   location_path: string[];
   address: string;
   lat: number;
   lng: number;
-  contact_name: string | null;
-  contact_phone: string | null;
-  same_day_food: boolean;
+  location_approx: boolean;     // only the city centre is known: call first; the first delivery fixes it
+  phone: string | null;
+  website: string | null;
+  about: string | null;
+  takes_cooked_food: boolean;
+  source_url: string | null;
+  found_by: "web_search" | "admin" | string;
   is_active: boolean;
-  closes_at: string | null;
-  categories: { id: number; name: string }[];
+  categories: { id: number; name: string }[];   // empty = takes everything
   items_30d: number;
-  open_requests: number;
   created_at: string;
   place_warning?: string | null;
-  place_centre?: { name: string; lat: number; lng: number } | null;
 }
 
-export interface PointRequest {
-  id: string;
-  category: { id: number; name: string };
-  quantity: number;
-  note: string | null;
-  status: "open" | "fulfilled" | "cancelled";
-  requested_by_name: string;
-  created_at: string;
-}
-
-export interface PointDetail extends Point {
-  requests: PointRequest[];
+export interface NgoSearch {
+  place: string;
+  found: number;
+  added: number;
+  updated: number;
+  status: string;
+  ngos: Ngo[];
 }
 
 // ---------- Phase 6: needs by area, disaster alerts, data sources ----------
@@ -428,7 +425,7 @@ export interface Alert {
   recommend_notes?: string[];
   families?: number | null;
   sources: { title: string; url: string | null; publisher: string | null; published_at: string | null }[];
-  camps: { id: string; name: string; is_active: boolean }[];
+  ngos: { id: string; name: string; city: string; city_id: string; phone: string | null; address: string }[];
 }
 
 export interface DataSource {

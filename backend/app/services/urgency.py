@@ -5,7 +5,7 @@ Points (Phase 5 version):
   food type        cooked +35, dry / packed +5
   time since cooked (cooked only)  <1 h +10, 1-3 h +25, 3-6 h +35, 6 h+ +40
   quantity         +0.35 per item, up to +20
-  pickup distance  to the nearest open point that hands out cooked food the same day (cooked only):
+  pickup distance  to the nearest NGO that takes cooked food (cooked only):
                    <=2 km +12, <=5 km +8, <=10 km +4, further +0
 A cooked meal more than 8 hours old gets a warning reason (0 points) so the admin checks it is still safe.
 """
@@ -24,7 +24,7 @@ def food_urgency(
     prepared_at: Optional[datetime],
     quantity: int,
     now: datetime,
-    point_distance_km: Optional[float] = None,
+    ngo_distance_km: Optional[float] = None,
 ) -> tuple[Optional[int], list[tuple[str, int]]]:
     """Returns (score, reasons). Reasons are shown to the admin, e.g. ("Food type: cooked", 35)."""
     if not is_food:
@@ -52,10 +52,10 @@ def food_urgency(
     if qty_pts:
         reasons.append((f"Quantity: {quantity}", qty_pts))
     if cooked:
-        if point_distance_km is None:
-            reasons.append(("No open point for cooked food yet", 0))
+        if ngo_distance_km is None:
+            reasons.append(("No NGO for cooked food known yet", 0))
         else:
-            d = point_distance_km
+            d = ngo_distance_km
             pts = 12 if d <= 2 else 8 if d <= 5 else 4 if d <= 10 else 0
-            reasons.append((f"Nearest food point: {d:.1f} km", pts))
+            reasons.append((f"Nearest NGO for cooked food: {d:.1f} km", pts))
     return min(100, sum(p for _, p in reasons)), reasons

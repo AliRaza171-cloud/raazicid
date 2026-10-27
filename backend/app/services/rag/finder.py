@@ -44,7 +44,7 @@ def use_web(mode: str, hits: list) -> bool:
 
 SYSTEM = """You are the need finder for RAAZICID, a donation charity in Pakistan that collects goods (food, rations,
 clothes, blankets, winter items, hygiene kits, baby items, household items, school supplies, books, mobility aids,
-emergency relief) and hands them out through its own distribution points and relief camps.
+emergency relief) and delivers them with its own riders to NGOs in the city, who give them to people in need.
 
 Answer the admin's question using ONLY the sources given (and web search results if you search).
 
@@ -202,8 +202,8 @@ def build_prompt(question: str, place: Optional[str], category: Optional[str], h
             parts.append(f"[S{i}] {h.title} ({h.publisher or h.source}, {_fmt_date(h.published_at)}{where}){tags}\n{h.text}")
     else:
         parts.append("(no matching passages in the library)")
-    parts.append("\n## RAAZICID need levels (from IPC, food prices, poverty, OCHA people in need, rainfall, disaster alerts and "
-                 "point requests) and who already works where (OCHA 3W). A place with high need and no organisation working "
+    parts.append("\n## RAAZICID need levels (from IPC, food prices, poverty, OCHA people in need, rainfall, displacement and "
+                 "disaster alerts) and who already works where (OCHA 3W). A place with high need and no organisation working "
                  "on it is a gap RAAZICID could fill: say so when it applies. Long-term deprivation facts come from surveys a few "
                  "years old (PSLM, HIES, IOM DTM): use them to explain lasting need, never as proof of a need this month.")
     if facts:

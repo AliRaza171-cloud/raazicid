@@ -6,8 +6,8 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Category, DistributionPoint, Donation, FraudFlag, Job, RiderPing, RiderProfile, User
-from app.models.enums import DonationStatus, ImageKind, JobStatus, RiderStatus, Role, Severity
+from app.models import Category, Donation, FraudFlag, Job, Ngo, RiderPing, RiderProfile, User
+from app.models.enums import ImageKind, JobStatus, RiderStatus, Role, Severity
 from app.schemas.jobs import AdminTrackingItem, JobOut, LatLng, Place, RiderOption, ScoreReason, TrackingOut, TrackingRider
 from app.services.accounts import notify
 from app.services.donations import ref
@@ -85,16 +85,16 @@ def _place_pickup(db: Session, d: Donation) -> Place:
                  area=location_path(db, d.pickup_location_id)[-2:])
 
 
-def _place_point(db: Session, p: Optional[DistributionPoint]) -> Optional[Place]:
-    if p is None:
+def _place_ngo(db: Session, n: Optional[Ngo]) -> Optional[Place]:
+    if n is None:
         return None
-    return Place(name=p.name, address=p.address, lat=p.lat, lng=p.lng, area=location_path(db, p.location_id)[-2:],
-                 contact_name=p.contact_name, contact_phone=p.contact_phone)
+    return Place(name=n.name, address=n.address, lat=n.lat, lng=n.lng, area=location_path(db, n.location_id)[-2:],
+                 contact_phone=n.phone, approx=n.location_approx)
 
 
 def job_out(db: Session, job: Job) -> JobOut:
     d = db.get(Donation, job.donation_id)
-    point = db.get(DistributionPoint, d.point_id) if d.point_id else None
+    ngo = db.get(Ngo, d.ngo_id) if d.ngo_id else None
     donor = db.get(User, d.donor_id)
     cat = db.get(Category, d.category_id)
     shared = job.status in (JobStatus.accepted, JobStatus.picked_up)
@@ -105,10 +105,9 @@ def job_out(db: Session, job: Job) -> JobOut:
         category=cat.name if cat else "?", quantity=d.quantity, description=d.description, is_food=d.is_food,
         food_type=d.food_type, prepared_at=d.prepared_at, urgency_score=d.urgency_score,
         photos=[i.url for i in d.images if i.kind == ImageKind.donor_photo],
-        pickup=_place_pickup(db, d), pickup_from=d.pickup_from, pickup_to=d.pickup_to, point=_place_point(db, point),
+        pickup=_place_pickup(db, d), pickup_from=d.pickup_from, pickup_to=d.pickup_to, ngo=_place_ngo(db, ngo),
         donor_name=donor.full_name, donor_phone=donor.phone if shared else None,
-        trip_km=round(distance_km(d.pickup_lat, d.pickup_lng, point.lat, point.lng), 1) if point else None,
-        can_hand_out=job.status == JobStatus.delivered and d.status == DonationStatus.at_point,
+        trip_km=round(distance_km(d.pickup_lat, d.pickup_lng, ngo.lat, ngo.lng), 1) if ngo else None,
     )
 
 
@@ -124,25 +123,25 @@ def _stalled(job: Job, last: Optional[RiderPing], now: datetime) -> bool:
 
 
 def tracking(db: Session, d: Donation, job: Optional[Job]) -> TrackingOut:
-    point = db.get(DistributionPoint, d.point_id) if d.point_id else None
+    ngo = db.get(Ngo, d.ngo_id) if d.ngo_id else None
     now = datetime.now(timezone.utc)
     if job is None:
         return TrackingOut(donation_id=d.id, donation_status=d.status.value, job_id=None, job_status=None, heading_to=None,
                            rider=None, last=None, path=[], stalled=False, pickup=_place_pickup(db, d),
-                           point=_place_point(db, point))
+                           ngo=_place_ngo(db, ngo))
     rider = db.get(User, job.rider_id)
     rp = rider.rider_profile
     pings = list(db.scalars(select(RiderPing).where(RiderPing.job_id == job.id)
                             .order_by(RiderPing.recorded_at.desc()).limit(240)))[::-1]
     last = pings[-1] if pings else None
-    heading = "point" if job.status in (JobStatus.picked_up, JobStatus.delivered) else "pickup"
+    heading = "ngo" if job.status in (JobStatus.picked_up, JobStatus.delivered) else "pickup"
     return TrackingOut(
         donation_id=d.id, donation_status=d.status.value, job_id=job.id, job_status=job.status, heading_to=heading,
         rider=TrackingRider(full_name=rider.full_name, phone=rider.phone, vehicle_type=rp.vehicle_type,
                             vehicle_number=rp.vehicle_number),
         last=LatLng(lat=last.lat, lng=last.lng, at=last.recorded_at) if last else None,
         path=[LatLng(lat=p.lat, lng=p.lng, at=p.recorded_at) for p in pings],
-        stalled=_stalled(job, last, now), pickup=_place_pickup(db, d), point=_place_point(db, point),
+        stalled=_stalled(job, last, now), pickup=_place_pickup(db, d), ngo=_place_ngo(db, ngo),
     )
 
 
@@ -153,14 +152,14 @@ def admin_tracking(db: Session) -> list[AdminTrackingItem]:
         d = db.get(Donation, job.donation_id)
         rider = db.get(User, job.rider_id)
         last = _last_ping(db, job)
-        point = db.get(DistributionPoint, d.point_id) if d.point_id else None
+        ngo = db.get(Ngo, d.ngo_id) if d.ngo_id else None
         items.append(AdminTrackingItem(
             job_id=job.id, job_status=job.status, donation_id=d.id, donation_ref=ref(d), title=d.title,
             rider_name=rider.full_name, rider_phone=rider.phone,
-            heading_to="point" if job.status == JobStatus.picked_up else "pickup",
+            heading_to="ngo" if job.status == JobStatus.picked_up else "pickup",
             last=LatLng(lat=last.lat, lng=last.lng, at=last.recorded_at) if last else None,
             minutes_since_ping=int((now - last.recorded_at).total_seconds() // 60) if last else None,
-            stalled=_stalled(job, last, now), pickup=_place_pickup(db, d), point=_place_point(db, point),
+            stalled=_stalled(job, last, now), pickup=_place_pickup(db, d), ngo=_place_ngo(db, ngo),
         ))
     # Stalled first, so the admin sees problems at the top
     items.sort(key=lambda i: (not i.stalled, i.minutes_since_ping is None))

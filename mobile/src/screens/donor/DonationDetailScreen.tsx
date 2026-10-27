@@ -99,7 +99,7 @@ export default function DonationDetailScreen() {
       <View style={st.card}>
         <Row label="Pickup" value={`${d.pickup.address}\n${d.pickup.location_path.slice(-2).join(", ")}`} />
         <Row label="When" value={windowText(d.pickup.from, d.pickup.to)} />
-        {d.point ? <Row label="Going to" value={`${d.point.name}\n${d.point.location_path.slice(-2).join(", ")}`} /> : null}
+        {d.ngo ? <Row label={d.status === "delivered" ? "Delivered to" : "Going to"} value={`${d.ngo.name}\n${d.ngo.location_path.slice(-2).join(", ")}`} /> : null}
       </View>
 
       {d.job && (d.status === "rider_assigned" || d.status === "picked_up") ? (
@@ -111,13 +111,11 @@ export default function DonationDetailScreen() {
         </View>
       ) : null}
 
-      {d.hand_out ? (
+      {d.status === "delivered" ? (
         <View style={[st.banner, { backgroundColor: colors.primarySoft }]}>
-          <Text style={{ fontWeight: "800", color: colors.primaryDark }}>
-            Handed out{d.hand_out.families_served ? ` to ${d.hand_out.families_served} families` : ""}. Thank you!
-          </Text>
+          <Text style={{ fontWeight: "800", color: colors.primaryDark }}>Delivered. Thank you!</Text>
           <Text style={{ color: colors.ink2 }}>
-            {d.hand_out.quantity} of {d.quantity} given out at {d.point?.name ?? "the distribution point"}.
+            Our rider gave your donation to {d.ngo?.name ?? "the NGO"}, who will pass it on to people in need.
           </Text>
         </View>
       ) : null}
@@ -156,7 +154,7 @@ export default function DonationDetailScreen() {
   );
 }
 
-const PROOF = { pickup_proof: "Picked up from you", delivery_proof: "At the point", distribution_proof: "Handed out" } as const;
+const PROOF = { pickup_proof: "Picked up from you", delivery_proof: "Handed to the NGO" } as const;
 
 function Row({ label, value }: { label: string; value: string }) {
   return (

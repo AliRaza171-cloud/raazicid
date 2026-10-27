@@ -2,19 +2,18 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { Link } from "react-router-dom";
 import { PageHeader } from "../components/Layout";
 import LiveMap, { type MapMarker } from "../components/LiveMap";
-import { api, type AreaNeed, type AreaNeeds, type AreaRow, type Category, type DepValue, type Deprivation, type NeedReason, type Point } from "../lib/api";
-import { LEVELS, SHORT_CAT, ago, pointTypeLabel } from "../lib/format";
+import { api, type AreaNeed, type AreaNeeds, type AreaRow, type Category, type DepValue, type Deprivation, type NeedReason, type Ngo } from "../lib/api";
+import { LEVELS, SHORT_CAT, ago } from "../lib/format";
 
 const DOT = ["#9aa39e", "#d4a800", "#d9772b", "#a2361a"];
-const POINT_COLOR = "#2449A8";
-const CAMP_COLOR = "#7c3aed";
+const NGO_COLOR = "#2449A8";
 const GAP_RING = "#a2361a";
-// A place in high or urgent need is a "coverage gap" when no open point that takes the item is this close
+// A place in high or urgent need is a "coverage gap" when no NGO we know that takes the item is this close
 const GAP_KM: Record<string, number> = { city: 30, region: 30, area: 10 };
 
 type Crumb = { id: string | null; name: string };
 type Picked = { place: string; need: AreaNeed };
-type Nearest = { point: Point; km: number } | null;
+type Nearest = { ngo: Ngo; km: number } | null;
 type Gap = { row: AreaRow; level: number; need: string; nearest: Nearest; why: string };
 
 function km(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -23,18 +22,18 @@ function km(a: { lat: number; lng: number }, b: { lat: number; lng: number }): n
   return 2 * 6371 * Math.asin(Math.sqrt(h));
 }
 
-const takes = (p: Point, categoryId: number | null) => categoryId === null || p.categories.length === 0 || p.categories.some((c) => c.id === categoryId);
+const takes = (p: Ngo, categoryId: number | null) => categoryId === null || p.categories.length === 0 || p.categories.some((c) => c.id === categoryId);
 
 export default function NeedsMap() {
   const [trail, setTrail] = useState<Crumb[]>([{ id: null, name: "Pakistan" }]);
   const [data, setData] = useState<AreaNeeds | null>(null);
   const [cats, setCats] = useState<Category[]>([]);
-  const [points, setPoints] = useState<Point[]>([]);
+  const [points, setPoints] = useState<Ngo[]>([]);   // NGOs we know
   const [view, setView] = useState<"grid" | "map">("grid");
   const [categoryId, setCategoryId] = useState<number | null>(null);   // map colour and gaps for one category, or all
   const [picked, setPicked] = useState<Picked | null>(null);
   const [focusRow, setFocusRow] = useState<string | null>(null);      // place clicked on the map
-  const [focusPoint, setFocusPoint] = useState<string | null>(null);  // point clicked on the map
+  const [focusPoint, setFocusPoint] = useState<string | null>(null);  // NGO clicked on the map
   const [busy, setBusy] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanMsg, setScanMsg] = useState<string | null>(null);
@@ -58,8 +57,8 @@ export default function NeedsMap() {
   useEffect(loadDep, [loadDep]);
   useEffect(() => {
     api<Category[]>("/categories").then(setCats).catch(() => undefined);
-    // reload points when you come back to this tab (e.g. after adding one on the Points page)
-    const loadPoints = () => api<Point[]>("/points?open_only=true").then(setPoints).catch(() => undefined);
+    // reload NGOs when you come back to this tab (e.g. after a web search on the NGOs page)
+    const loadPoints = () => api<Ngo[]>("/admin/ngos").then(setPoints).catch(() => undefined);
     loadPoints();
     window.addEventListener("focus", loadPoints);
     return () => window.removeEventListener("focus", loadPoints);
@@ -130,14 +129,14 @@ export default function NeedsMap() {
       for (const p of points) {
         if (!takes(p, cat)) continue;
         const d = km({ lat: row.lat, lng: row.lng }, p);
-        if (!best || d < best.km) best = { point: p, km: d };
+        if (!best || d < best.km) best = { ngo: p, km: d };
       }
       return best;
     },
     [points],
   );
 
-  // Places in high or urgent need with no suitable open point nearby
+  // Places in high or urgent need with no NGO nearby that takes the item
   const gaps: Gap[] = useMemo(() => {
     if (!data) return [];
     const out: Gap[] = [];
@@ -149,14 +148,14 @@ export default function NeedsMap() {
       const cat = categoryId ?? need.category_id;
       if (row.level === "province") {
         const inside = points.filter((p) => p.location_path[0] === row.name && takes(p, cat));
-        if (inside.length === 0) out.push({ row, level: lv, need: need.name, nearest: nearestFor(row, cat), why: `No open point in ${row.name} takes ${need.name.toLowerCase()}` });
+        if (inside.length === 0) out.push({ row, level: lv, need: need.name, nearest: nearestFor(row, cat), why: `No NGO we know in ${row.name} takes ${need.name.toLowerCase()}` });
         continue;
       }
       const nearest = nearestFor(row, cat);
       const limit = GAP_KM[row.level] ?? 30;
       if (!nearest || nearest.km > limit) {
         out.push({ row, level: lv, need: need.name, nearest,
-          why: nearest ? `Nearest point for ${need.name.toLowerCase()} is ${Math.round(nearest.km)} km away` : `No open point takes ${need.name.toLowerCase()}` });
+          why: nearest ? `Nearest NGO for ${need.name.toLowerCase()} is ${Math.round(nearest.km)} km away` : `No NGO we know takes ${need.name.toLowerCase()}` });
       }
     }
     return out.sort((a, b) => b.level - a.level || (b.nearest?.km ?? 1e9) - (a.nearest?.km ?? 1e9));
@@ -172,16 +171,16 @@ export default function NeedsMap() {
         const lv = levelOf(r);
         const top = r.needs.filter((n) => n.level >= 2).map((n) => n.name);
         return {
-          id: r.id, lat: r.lat as number, lng: r.lng as number, kind: "point" as const, color: DOT[lv], size: 14 + lv * 5,
+          id: r.id, lat: r.lat as number, lng: r.lng as number, kind: "ngo" as const, color: DOT[lv], size: 14 + lv * 5,
           ring: gapIds.has(r.id) ? GAP_RING : undefined, selected: focusRow === r.id,
-          label: `${r.name}: ${LEVELS[lv].label}${categoryId === null && top.length ? ` (${top.slice(0, 3).join(", ")})` : ""}${gapIds.has(r.id) ? " · no point nearby" : ""}${r.neglected.length ? " · neglected" : ""}`,
+          label: `${r.name}: ${LEVELS[lv].label}${categoryId === null && top.length ? ` (${top.slice(0, 3).join(", ")})` : ""}${gapIds.has(r.id) ? " · no NGO nearby" : ""}${r.neglected.length ? " · neglected" : ""}`,
           onClick: () => { setFocusPoint(null); setPicked(null); setFocusRow(r.id); },
         };
       }),
     ...pointsHere.map((p) => ({
-      id: `p-${p.id}`, lat: p.lat, lng: p.lng, kind: "point" as const, square: true, size: 14,
-      color: p.type === "relief_camp" ? CAMP_COLOR : POINT_COLOR, selected: focusPoint === p.id,
-      label: `${p.name} (${pointTypeLabel(p.type)})${p.place_warning ? " · pin may be in the wrong place" : ""}`,
+      id: `p-${p.id}`, lat: p.lat, lng: p.lng, kind: "ngo" as const, square: true, size: 14,
+      color: NGO_COLOR, selected: focusPoint === p.id,
+      label: `${p.name} (NGO)${p.location_approx ? " · office not on the map yet" : ""}`,
       onClick: () => { setFocusRow(null); setPicked(null); setFocusPoint(p.id); },
     })),
   ];
@@ -191,7 +190,7 @@ export default function NeedsMap() {
 
   return (
     <>
-      <PageHeader title="Needs by area" sub="What each area needs: UN data (IPC, prices, poverty, people in need, rainfall), an AI scan of recent news and reports, disasters and point requests, and whether we have a point nearby.">
+      <PageHeader title="Needs by area" sub="What each area needs: UN data (IPC, prices, poverty, people in need, rainfall), an AI scan of recent news and reports, disasters and displacement, and whether we know an NGO nearby to deliver to.">
         <span className="muted small">Updated {ago(data?.computed_at ?? null)}</span>
         <button className="btn ghost small" onClick={recompute} disabled={busy || scanning}>{busy ? "Working…" : "Recompute now"}</button>
         <button className="btn small" onClick={aiScan} disabled={scanning} title="The AI searches news, UN and NGO reports from the last 90 days (1-4 minutes, a few cents)">
@@ -223,10 +222,9 @@ export default function NeedsMap() {
           {LEVELS.map((l) => <span key={l.label}><span className={`sw ${l.cls}`} />{l.label}</span>)}
           {view === "map" ? (
             <>
-              <span><span className="sw" style={{ background: POINT_COLOR, borderRadius: 4 }} />Open distribution point</span>
-              <span><span className="sw" style={{ background: CAMP_COLOR, borderRadius: 4 }} />Relief camp</span>
-              <span><span className="sw" style={{ background: "#fff", boxShadow: `0 0 0 2px ${GAP_RING}`, borderRadius: 9 }} />No point nearby</span>
-              <span className="muted">· Click a place or a point.</span>
+              <span><span className="sw" style={{ background: NGO_COLOR, borderRadius: 4 }} />NGO</span>
+              <span><span className="sw" style={{ background: "#fff", boxShadow: `0 0 0 2px ${GAP_RING}`, borderRadius: 9 }} />No NGO nearby</span>
+              <span className="muted">· Click a place or an NGO.</span>
             </>
           ) : (
             <span className="muted">· Click a coloured cell to see why. Click a place name to look inside it.</span>
@@ -265,7 +263,7 @@ export default function NeedsMap() {
                             <strong>{r.name}</strong>
                           )}
                           <div className="muted small" style={{ textTransform: "capitalize" }}>
-                            {r.level}{gapIds.has(r.id) && <span style={{ color: "var(--urgent)", fontWeight: 700, textTransform: "none" }}> · no point nearby</span>}
+                            {r.level}{gapIds.has(r.id) && <span style={{ color: "var(--urgent)", fontWeight: 700, textTransform: "none" }}> · no NGO nearby</span>}
                             {r.neglected.length > 0 && <span style={{ color: "#7c3aed", fontWeight: 700, textTransform: "none" }} title="High need, but no UN agency or NGO works on it here (OCHA 3W)"> · neglected</span>}
                           </div>
                         </td>
@@ -299,7 +297,7 @@ export default function NeedsMap() {
                 gap={gaps.find((g) => g.row.id === row.id) ?? null}
                 onReason={(n) => setPicked({ place: row.name, need: n })} onOpen={() => open(row)} />
             ) : point ? (
-              <PointPanel p={point} />
+              <NgoPanel p={point} />
             ) : (
               <Summary here={here} data={data} onPick={(n) => setPicked({ place: here.name, need: n })} />
             )}
@@ -346,12 +344,12 @@ export default function NeedsMap() {
               Coverage gaps{categoryId !== null ? ` for ${cats.find((c) => c.id === categoryId)?.name.toLowerCase()}` : ""} in {here.name}
             </h2>
             <p className="muted small" style={{ margin: "2px 0 0" }}>
-              High or urgent need, but no open point that takes the item within {GAP_KM.city} km (10 km for an area). These are the places to open a point or a relief camp.
+              High or urgent need, but no NGO we know that takes the item within {GAP_KM.city} km (10 km for an area). Search the web for NGOs there, so donations can reach them.
             </p>
           </div>
           {gaps.length === 0 ? (
             <p className="muted" style={{ padding: "10px 18px 16px", margin: 0 }}>
-              {data ? "No gaps: every place in high or urgent need has a point nearby." : "Loading…"}
+              {data ? "No gaps: every place in high or urgent need has an NGO nearby." : "Loading…"}
             </p>
           ) : (
             <table className="table">
@@ -361,7 +359,7 @@ export default function NeedsMap() {
                   <tr key={g.row.id}>
                     <td><strong>{g.row.name}</strong><div className="muted small" style={{ textTransform: "capitalize" }}>{g.row.level}</div></td>
                     <td><span className={`chip lv${g.level}`}>{LEVELS[g.level].label}</span> {g.need}</td>
-                    <td>{g.why}{g.nearest && <div className="muted small">Nearest: {g.nearest.point.name}</div>}</td>
+                    <td>{g.why}{g.nearest && <div className="muted small">Nearest: {g.nearest.ngo.name}</div>}</td>
                     <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                       {g.row.lat !== null && (
                         <button className="btn ghost small" onClick={() => { setView("map"); setPicked(null); setFocusPoint(null); setFocusRow(g.row.id); }}>Show on map</button>
@@ -480,7 +478,7 @@ function PlacePanel({ row, categoryId, levelOf, nearest, gap, onReason, onOpen, 
       {gap && (
         <div className="flash bad" style={{ fontWeight: 600 }}>
           Coverage gap: {gap.why}.
-          <div style={{ fontWeight: 500, marginTop: 4 }}>Open a distribution point, or a relief camp if there is a disaster here.</div>
+          <div style={{ fontWeight: 500, marginTop: 4 }}>Search the web for NGOs here on the NGOs page, so riders can deliver to them.</div>
         </div>
       )}
       {needs.length === 0 ? (
@@ -497,7 +495,7 @@ function PlacePanel({ row, categoryId, levelOf, nearest, gap, onReason, onOpen, 
         </div>
       )}
       <div className="muted small">
-        {nearest ? <>Nearest open point: <strong style={{ color: "var(--ink)" }}>{nearest.point.name}</strong>, {Math.round(nearest.km)} km</> : "No open distribution point takes this yet."}
+        {nearest ? <>Nearest NGO: <strong style={{ color: "var(--ink)" }}>{nearest.ngo.name}</strong>, {Math.round(nearest.km)} km</> : "No NGO we know takes this yet."}
       </div>
       {row.neglected.length > 0 && (
         <div className="flash" style={{ background: "#f1ebfe", color: "#5b21b6", fontWeight: 600 }}>
@@ -533,32 +531,31 @@ function PlacePanel({ row, categoryId, levelOf, nearest, gap, onReason, onOpen, 
       )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {row.has_children && <button className="btn small" onClick={onOpen}>Look inside {row.name}</button>}
-        <Link className="btn ghost small" to="/points">Distribution points</Link>
+        <Link className="btn ghost small" to="/ngos">NGOs</Link>
         <Link className="btn ghost small" to="/disasters">Disaster alerts</Link>
       </div>
     </>
   );
 }
 
-function PointPanel({ p }: { p: Point }) {
+function NgoPanel({ p }: { p: Ngo }) {
   return (
     <>
       <div>
-        <span className="chip info">{pointTypeLabel(p.type)}</span>
+        <span className="chip info">NGO</span>
         <h2 style={{ margin: "8px 0 0", fontSize: 18 }}>{p.name}</h2>
-        <span className="muted small">{p.address} · {p.location_path.slice(-2).join(", ")}</span>
+        <span className="muted small">{p.address} · {p.location_path.slice(-2).join(", ")}{p.phone ? ` · ${p.phone}` : ""}</span>
+        {p.about && <div className="small" style={{ marginTop: 4 }}>{p.about}</div>}
       </div>
       <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-        {p.same_day_food && <span className="chip ok">Same-day food</span>}
+        {p.takes_cooked_food && <span className="chip ok">Cooked food</span>}
         {p.categories.length === 0 ? <span className="chip wait">Takes everything</span> : p.categories.map((c) => <span key={c.id} className="chip wait">{c.name}</span>)}
       </div>
-      <div style={{ display: "flex", gap: 20 }}>
-        <div><div className="kpi-label">Last 30 days</div><div style={{ fontSize: 20, fontWeight: 800 }}>{p.items_30d} items</div></div>
-        <div><div className="kpi-label">Open requests</div><div style={{ fontSize: 20, fontWeight: 800 }}>{p.open_requests}</div></div>
-      </div>
+      <div><div className="kpi-label">Last 30 days</div><div style={{ fontSize: 20, fontWeight: 800 }}>{p.items_30d} donations</div></div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <Link className="btn ghost small" to="/points">Manage points</Link>
-        <a className="btn ghost small" href={`https://www.google.com/maps?q=${p.lat},${p.lng}`} target="_blank" rel="noreferrer">Google Maps</a>
+        <Link className="btn ghost small" to="/ngos">Manage NGOs</Link>
+        {!p.location_approx && <a className="btn ghost small" href={`https://www.google.com/maps?q=${p.lat},${p.lng}`} target="_blank" rel="noreferrer">Google Maps</a>}
+        {p.source_url && <a className="btn ghost small" href={p.source_url} target="_blank" rel="noreferrer">Source</a>}
       </div>
     </>
   );
@@ -585,7 +582,7 @@ function Summary({ here, data, onPick }: { here: Crumb; data: AreaNeeds | null; 
       )}
       <p className="muted small" style={{ margin: 0 }}>
         Only evidence from the last 2 years counts: IPC food insecurity and WFP food prices (HDX), the AI scan of recent
-        news and UN / NGO reports, disaster alerts, rainfall and what people ask for at our points. An empty cell means no
+        news and UN / NGO reports, disaster alerts, rainfall and displacement. An empty cell means no
         recent evidence yet: run <strong>Update … with AI</strong> for that province.
       </p>
     </>

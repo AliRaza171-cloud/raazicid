@@ -96,13 +96,16 @@ class CategoryRef(BaseModel):
     name: str
 
 
-class PointRef(BaseModel):
+class NgoRef(BaseModel):
+    """The NGO our rider drops the donation at."""
     id: uuid.UUID
     name: str
     address: str
     location_path: list[str]
     lat: float
     lng: float
+    phone: Optional[str]
+    location_approx: bool          # only the city centre is known
 
 
 class HistoryItem(BaseModel):
@@ -136,7 +139,7 @@ class DonationListItem(BaseModel):
     urgency_score: Optional[int]
     photo_url: Optional[str]
     pickup_area: list[str]         # last two place names, e.g. ["Karachi East", "Gulshan-e-Iqbal"]
-    point_name: Optional[str]
+    ngo_name: Optional[str]
     donor_name: Optional[str] = None   # admin list only
     created_at: datetime
 
@@ -157,20 +160,11 @@ class Pickup(BaseModel):
 
 
 class ProofPhoto(BaseModel):
-    kind: Literal["pickup_proof", "delivery_proof", "distribution_proof"]
+    kind: Literal["pickup_proof", "delivery_proof"]
     url: str
     lat: Optional[float]
     lng: Optional[float]
-    distance_km: Optional[float]   # from where it should have been taken (pickup address / point)
-    at: datetime
-
-
-class HandOutRef(BaseModel):
-    quantity: int
-    families_served: Optional[int]
-    photo_url: Optional[str]
-    note: Optional[str]
-    by_name: str
+    distance_km: Optional[float]   # from where it should have been taken (pickup address / NGO)
     at: datetime
 
 
@@ -191,7 +185,7 @@ class DonationOut(DonationListItem):
     prepared_at: Optional[datetime]
     urgency_reasons: list[UrgencyReason]
     pickup: Pickup
-    point: Optional[PointRef]
+    ngo: Optional[NgoRef]
     reject_reason: Optional[str]
     photos: list[str]
     history: list[HistoryItem]
@@ -200,7 +194,6 @@ class DonationOut(DonationListItem):
     can_cancel: bool
     job: Optional[JobRef] = None          # current rider job (Phase 4)
     proofs: list[ProofPhoto] = []
-    hand_out: Optional[HandOutRef] = None
 
 
 class DonationCounts(BaseModel):
@@ -209,26 +202,29 @@ class DonationCounts(BaseModel):
     rejected: int
     rider_assigned: int
     picked_up: int
-    at_point: int
-    handed_out: int
+    delivered: int
     cancelled: int
 
 
 class AcceptIn(BaseModel):
-    point_id: uuid.UUID
+    ngo_id: uuid.UUID
 
 
 class RejectIn(BaseModel):
     reason: str = Field(min_length=3, max_length=500)
 
 
-class PointOption(BaseModel):
-    """A distribution point that can take this donation, ranked for the admin."""
+class NgoOption(BaseModel):
+    """An NGO that can take this donation, ranked for the admin: same city first, then nearest to the pickup."""
     id: uuid.UUID
     name: str
-    type: str
+    address: str
     location_path: list[str]
     distance_km: float
     match: Literal["same_area", "same_region", "same_city", "same_province", "other"]
-    same_day_food: bool
+    phone: Optional[str]
+    takes_cooked_food: bool
+    location_approx: bool
+    found_by: str
+    source_url: Optional[str]
     items_30d: int

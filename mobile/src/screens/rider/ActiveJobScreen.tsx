@@ -101,8 +101,8 @@ export default function ActiveJobScreen() {
     );
   }
 
-  const toPoint = job.status === "picked_up";
-  const dest = toPoint ? job.point! : job.pickup;
+  const toPoint = job.status === "picked_up";   // heading to the NGO
+  const dest = toPoint ? job.ngo! : job.pickup;
   const step = toPoint ? 2 : 0;
 
   return (
@@ -121,16 +121,20 @@ export default function ActiveJobScreen() {
         </View>
 
         <View style={st.card}>
-          <Text style={st.small}>{toPoint ? "Drop-off" : "Pickup"}</Text>
+          <Text style={st.small}>{toPoint ? "Drop-off at the NGO" : "Pickup"}</Text>
           <Text style={st.h2}>{toPoint ? dest.name : job.donor_name}</Text>
           <Text style={{ color: colors.ink2 }}>{dest.address}</Text>
           <Text style={{ color: colors.muted }}>{dest.area.join(", ")}</Text>
           {!toPoint ? <Text style={{ color: colors.ink2 }}>When: {windowText(job.pickup_from, job.pickup_to)}</Text> : null}
           <Text style={{ color: colors.ink2, fontWeight: "700" }}>{job.title} · {job.quantity} item{job.quantity === 1 ? "" : "s"}</Text>
-          <Button label={toPoint ? "Navigate to drop-off in Google Maps" : "Navigate to pickup in Google Maps"} onPress={() => Linking.openURL(directionsUrl(dest.lat, dest.lng))} />
-          {!toPoint && job.point ? (
-            <Button label={`See drop-off: ${job.point.name ?? "distribution point"}`} variant="outline"
-              onPress={() => Linking.openURL(placeUrl(job.point!.lat, job.point!.lng))} />
+          {toPoint && job.ngo?.approx ? (
+            <Text style={{ color: colors.warn, fontWeight: "700" }}>The NGO's office is not on the map yet. Call them for directions.</Text>
+          ) : (
+            <Button label={toPoint ? "Navigate to the NGO in Google Maps" : "Navigate to pickup in Google Maps"} onPress={() => Linking.openURL(directionsUrl(dest.lat, dest.lng))} />
+          )}
+          {!toPoint && job.ngo ? (
+            <Button label={`Drop-off: ${job.ngo.name ?? "the NGO"}`} variant="outline"
+              onPress={() => Linking.openURL(placeUrl(job.ngo!.lat, job.ngo!.lng))} />
           ) : null}
         </View>
 
@@ -143,7 +147,7 @@ export default function ActiveJobScreen() {
 
         <View style={st.card}>
           {job.donor_phone ? <Contact label="Donor" name={job.donor_name} phone={job.donor_phone} /> : null}
-          {job.point?.contact_phone ? <Contact label="Point contact" name={job.point.contact_name ?? job.point.name ?? ""} phone={job.point.contact_phone} /> : null}
+          {job.ngo?.contact_phone ? <Contact label="NGO" name={job.ngo.name ?? ""} phone={job.ngo.contact_phone} /> : null}
         </View>
 
         <Text style={{ fontSize: 12, color: sharing === "on" ? colors.primary : colors.warn }}>

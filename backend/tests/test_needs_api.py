@@ -1,4 +1,4 @@
-"""Phase 6 end-to-end: disaster alerts, what is needed, relief camp, needs by area, data sources.
+"""Phase 6 end-to-end: disaster alerts, what is needed, NGOs nearby, needs by area, data sources.
 Skipped without TEST_DATABASE_URL. Nothing here calls the internet."""
 
 from datetime import datetime, timezone
@@ -62,15 +62,11 @@ def test_alert_flow_and_needs_by_area(client, db):
     assert r.status_code == 200 and [(n["category_id"], n["quantity_needed"]) for n in r.json()["needs"]] == [(2, 150), (4, None)]
     assert client.put(f"{API}/admin/alerts/{alert['id']}/needs", headers=admin_h, json=[{"category_id": 99}]).status_code == 422
 
-    # Open a relief camp: a temporary point that takes what the alert needs
-    camp = {"name": "Lyari Relief Camp", "location_id": area(db, "Lyari"), "address": "Govt school ground, Chakiwara",
-            "lat": 24.867, "lng": 67.0, "open_days": 14}
-    assert client.post(f"{API}/admin/alerts/{alert['id']}/camp", headers=admin_h, json={**camp, "lat": 67.0, "lng": 24.867}).status_code == 422
-    r = client.post(f"{API}/admin/alerts/{alert['id']}/camp", headers=admin_h, json=camp)
-    assert r.status_code == 201, r.text
-    p = r.json()
-    assert p["type"] == "relief_camp" and p["same_day_food"] and p["closes_at"] and sorted(c["id"] for c in p["categories"]) == [2, 4]
-    assert client.get(f"{API}/admin/alerts/{alert['id']}", headers=admin_h).json()["camps"][0]["name"] == "Lyari Relief Camp"
+    # NGOs we know in the alert's city are listed, so the admin knows where riders can take donations
+    from tests.test_donations_api import make_ngo
+    make_ngo(client, admin_h, db, name="Lyari Welfare Trust", where="Lyari")
+    near = client.get(f"{API}/admin/alerts/{alert['id']}", headers=admin_h).json()["ngos"]
+    assert any(n["name"] == "Lyari Welfare Trust" and n["city"] == "Karachi" for n in near)
 
     # Confirming again keeps the admin's edits
     r = client.post(f"{API}/admin/alerts/{alert['id']}/status", headers=admin_h, json={"status": "confirmed"})
@@ -82,7 +78,6 @@ def test_alert_flow_and_needs_by_area(client, db):
     assert all(a["id"] != alert["id"] for a in client.get(f"{API}/alerts", headers=donor_h).json())
     sindh = province_row(client.get(f"{API}/needs", headers=donor_h).json(), "Sindh")
     assert need(sindh, 12) is None
-    assert client.post(f"{API}/admin/alerts/{alert['id']}/camp", headers=admin_h, json=camp).status_code == 409
 
 
 def test_gdacs_event_becomes_unconfirmed_alert(client, db):

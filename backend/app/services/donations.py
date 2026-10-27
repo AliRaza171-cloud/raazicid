@@ -1,24 +1,24 @@
 """Donation status moves and the shapes the apps read. Status rules: docs/status-flow.md."""
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import api_error
-from app.models import Category, DistributionPoint, Donation, HandOut, Job, Location, PointRequest, StatusChange, User
+from app.models import Category, Donation, Job, Location, Ngo, StatusChange, User
 from app.models.enums import DonationStatus as S
-from app.models.enums import ImageKind, JobStatus, RequestStatus
+from app.models.enums import ImageKind, JobStatus
 from app.schemas.donations import (
-    AiSuggestion, CategoryRef, DonationListItem, DonationOut, DonorRef, HandOutRef, HistoryItem, JobRef, Pickup,
-    PointOption, PointRef, ProofPhoto, UrgencyReason,
+    AiSuggestion, CategoryRef, DonationListItem, DonationOut, DonorRef, HistoryItem, JobRef, Pickup, ProofPhoto,
+    UrgencyReason,
 )
-from app.schemas.points import PointOut
 from app.services.accounts import notify
 from app.services.geo import distance_km
-from app.services.locations import ancestor_ids, centre, coords_problem, location_path
+from app.services.locations import location_path
+from app.services.ngos import nearest_food_ngo_km, ngo_ref
 from app.services.urgency import food_urgency
 
 # Which moves are allowed (from -> to). Phase 4 uses the rider steps.
@@ -26,11 +26,10 @@ ALLOWED: dict[S, set[S]] = {
     S.in_review: {S.accepted, S.rejected, S.cancelled},
     S.accepted: {S.rider_assigned, S.cancelled},
     S.rider_assigned: {S.accepted, S.picked_up},
-    S.picked_up: {S.at_point},
-    S.at_point: {S.handed_out},
+    S.picked_up: {S.delivered},
 }
-ACTIVE = [S.in_review, S.accepted, S.rider_assigned, S.picked_up, S.at_point]
-DONE = [S.handed_out, S.rejected, S.cancelled]
+ACTIVE = [S.in_review, S.accepted, S.rider_assigned, S.picked_up]
+DONE = [S.delivered, S.rejected, S.cancelled]
 CANCELLABLE = {S.in_review, S.accepted}
 
 # What the donor is told after each move
@@ -39,22 +38,11 @@ DONOR_MESSAGES: dict[S, tuple[str, str]] = {
     S.rejected: ("Donation not accepted", "We could not accept \"{title}\": {note}"),
     S.rider_assigned: ("Rider assigned", "A rider is coming to pick up \"{title}\"."),
     S.picked_up: ("Picked up", "\"{title}\" has been picked up. Thank you!"),
-    S.at_point: ("Delivered to the point", "\"{title}\" reached {point}."),
-    S.handed_out: ("Handed out", "\"{title}\" was handed out at {point}. {note} Thank you!"),
+    S.delivered: ("Delivered to the NGO", "\"{title}\" was delivered to {ngo}, who will give it to people in need. Thank you!"),
 }
 
 
 URGENCY_LIVE = {S.in_review, S.accepted, S.rider_assigned}   # food still waiting: urgency keeps rising
-
-
-def nearest_food_point_km(db: Session, lat: float, lng: float) -> Optional[float]:
-    """Distance to the nearest open point that can hand out cooked food the same day."""
-    best = None
-    for p in db.scalars(select(DistributionPoint).where(DistributionPoint.same_day_food.is_(True))):
-        if point_is_open(p):
-            km = distance_km(lat, lng, p.lat, p.lng)
-            best = km if best is None or km < best else best
-    return best
 
 
 def urgency_for(db: Session, d: Donation, now: Optional[datetime] = None) -> tuple[Optional[int], list[tuple[str, int]]]:
@@ -64,7 +52,7 @@ def urgency_for(db: Session, d: Donation, now: Optional[datetime] = None) -> tup
     if now is None:
         now = datetime.now(timezone.utc) if d.status in URGENCY_LIVE else d.created_at
     return food_urgency(d.is_food, d.food_type, d.prepared_at, d.quantity, now,
-                        nearest_food_point_km(db, d.pickup_lat, d.pickup_lng))
+                        nearest_food_ngo_km(db, d.pickup_lat, d.pickup_lng))
 
 
 def refresh_urgency(db: Session) -> None:
@@ -94,10 +82,10 @@ def change_status(
     msg = DONOR_MESSAGES.get(to)
     if msg and tell_donor and (by is None or by.id != d.donor_id):
         donor = db.get(User, d.donor_id)
-        point = db.get(DistributionPoint, d.point_id) if d.point_id else None
+        ngo = db.get(Ngo, d.ngo_id) if d.ngo_id else None
         title, body = msg
         notify(db, donor, f"donation_{to.value}", title,
-               body.format(title=d.title, note=note or "", point=point.name if point else "the distribution point"),
+               body.format(title=d.title, note=note or "", ngo=ngo.name if ngo else "the NGO"),
                {"donation_id": str(d.id)})
 
 
@@ -111,19 +99,19 @@ def _first_photo(d: Donation) -> Optional[str]:
 
 
 def list_item(db: Session, d: Donation, with_donor: bool = False) -> DonationListItem:
-    point = db.get(DistributionPoint, d.point_id) if d.point_id else None
+    ngo = db.get(Ngo, d.ngo_id) if d.ngo_id else None
     donor = db.get(User, d.donor_id) if with_donor else None
     return DonationListItem(
         id=d.id, ref=ref(d), title=d.title, category=_category(db, d.category_id), quantity=d.quantity,
         status=d.status, is_food=d.is_food, urgency_score=d.urgency_score, photo_url=_first_photo(d),
-        pickup_area=location_path(db, d.pickup_location_id)[-2:], point_name=point.name if point else None,
+        pickup_area=location_path(db, d.pickup_location_id)[-2:], ngo_name=ngo.name if ngo else None,
         donor_name=donor.full_name if donor else None, created_at=d.created_at,
     )
 
 
 def donation_out(db: Session, d: Donation) -> DonationOut:
     base = list_item(db, d, with_donor=True)
-    point = db.get(DistributionPoint, d.point_id) if d.point_id else None
+    ngo = db.get(Ngo, d.ngo_id) if d.ngo_id else None
     donor = db.get(User, d.donor_id)
     names = {u.id: u.full_name for u in db.scalars(select(User).where(User.id.in_({h.changed_by for h in d.history if h.changed_by})))}
     _, reasons = urgency_for(db, d)
@@ -139,8 +127,7 @@ def donation_out(db: Session, d: Donation) -> DonationOut:
             address=d.pickup_address, lat=d.pickup_lat, lng=d.pickup_lng, location_id=d.pickup_location_id,
             location_path=location_path(db, d.pickup_location_id), from_=d.pickup_from, to=d.pickup_to,
         ),
-        point=PointRef(id=point.id, name=point.name, address=point.address, lat=point.lat, lng=point.lng,
-                       location_path=location_path(db, point.location_id)) if point else None,
+        ngo=ngo_ref(db, ngo),
         reject_reason=d.reject_reason,
         photos=[i.url for i in d.images if i.kind == ImageKind.donor_photo],
         history=[
@@ -155,8 +142,7 @@ def donation_out(db: Session, d: Donation) -> DonationOut:
         ai=ai,
         can_cancel=d.status in CANCELLABLE,
         job=_job_ref(db, d),
-        proofs=_proofs(db, d, point),
-        hand_out=_hand_out(db, d),
+        proofs=_proofs(db, d, ngo),
     )
 
 
@@ -178,7 +164,7 @@ def _job_ref(db: Session, d: Donation) -> Optional[JobRef]:
                   vehicle=f"{rp.vehicle_type.value.title()} {rp.vehicle_number}" if rp else "", assigned_at=job.created_at)
 
 
-def _proofs(db: Session, d: Donation, point: Optional[DistributionPoint]) -> list[ProofPhoto]:
+def _proofs(db: Session, d: Donation, ngo: Optional[Ngo]) -> list[ProofPhoto]:
     out = []
     for i in d.images:
         if i.kind == ImageKind.donor_photo:
@@ -187,95 +173,10 @@ def _proofs(db: Session, d: Donation, point: Optional[DistributionPoint]) -> lis
         if i.lat is not None and i.lng is not None:
             if i.kind == ImageKind.pickup_proof:
                 dist = round(distance_km(i.lat, i.lng, d.pickup_lat, d.pickup_lng), 2)
-            elif point is not None:
-                dist = round(distance_km(i.lat, i.lng, point.lat, point.lng), 2)
+            elif ngo is not None and not ngo.location_approx:
+                dist = round(distance_km(i.lat, i.lng, ngo.lat, ngo.lng), 2)
         out.append(ProofPhoto(kind=i.kind.value, url=i.url, lat=i.lat, lng=i.lng, distance_km=dist, at=i.created_at))
     return out
-
-
-def _hand_out(db: Session, d: Donation) -> Optional[HandOutRef]:
-    h = db.scalar(select(HandOut).where(HandOut.donation_id == d.id).order_by(HandOut.created_at.desc()).limit(1))
-    if h is None:
-        return None
-    by = db.get(User, h.handed_out_by)
-    return HandOutRef(quantity=h.quantity, families_served=h.families_served, photo_url=h.photo_url, note=h.note,
-                      by_name=by.full_name if by else "?", at=h.created_at)
-
-
-# ---------- distribution points ----------
-
-def items_30d(db: Session, point_id: uuid.UUID) -> int:
-    since = datetime.now(timezone.utc) - timedelta(days=30)
-    return db.scalar(
-        select(func.count()).select_from(Donation).where(
-            Donation.point_id == point_id, Donation.created_at >= since,
-            Donation.status.notin_([S.rejected, S.cancelled]),
-        )
-    ) or 0
-
-
-def point_out(db: Session, p: DistributionPoint) -> PointOut:
-    open_req = db.scalar(
-        select(func.count()).select_from(PointRequest).where(PointRequest.point_id == p.id, PointRequest.status == RequestStatus.open)
-    ) or 0
-    return PointOut(
-        id=p.id, name=p.name, type=p.type, location_id=p.location_id, location_path=location_path(db, p.location_id),
-        address=p.address, lat=p.lat, lng=p.lng, contact_name=p.contact_name, contact_phone=p.contact_phone,
-        same_day_food=p.same_day_food, is_active=p.is_active, closes_at=p.closes_at,
-        categories=[CategoryRef(id=c.id, name=c.name) for c in sorted(p.categories, key=lambda c: c.id)],
-        items_30d=items_30d(db, p.id), open_requests=open_req, created_at=p.created_at,
-        place_warning=coords_problem(db, p.location_id, p.lat, p.lng),
-        place_centre=_centre_of(db, p.location_id),
-    )
-
-
-def _centre_of(db: Session, location_id: uuid.UUID) -> Optional[dict]:
-    c = centre(db, location_id)
-    return {"name": c.name, "lat": c.lat, "lng": c.lng} if c else None
-
-
-def point_is_open(p: DistributionPoint) -> bool:
-    return p.is_active and (p.closes_at is None or p.closes_at > datetime.now(timezone.utc))
-
-
-def point_takes(p: DistributionPoint, d: Donation) -> Optional[str]:
-    """None if the point can take this donation, otherwise the reason it cannot."""
-    if not point_is_open(p):
-        return "This point is closed"
-    if p.categories and d.category_id not in {c.id for c in p.categories}:
-        return "This point does not take this category"
-    if d.is_food and d.food_type is not None and d.food_type.value == "cooked" and not p.same_day_food:
-        return "This point cannot hand out cooked food the same day"
-    return None
-
-
-def point_options(db: Session, d: Donation, limit: int = 10) -> list[PointOption]:
-    """Open points that can take the donation: same area first, then region, city, province, then by distance.
-    Phase 6 adds area need and what each point received recently to this ranking."""
-    pickup_chain = ancestor_ids(db, d.pickup_location_id)   # [area, region, city, province]
-    levels = {loc_id: i for i, loc_id in enumerate(pickup_chain)}
-    names = ["same_area", "same_region", "same_city", "same_province"]
-    # The pickup place may be a city or region, so match names by the place's own level
-    loc_level_offset = 4 - len(pickup_chain) if pickup_chain else 0
-
-    options = []
-    for p in db.scalars(select(DistributionPoint)):
-        if point_takes(p, d) is not None:
-            continue
-        best = "other"
-        for loc_id in ancestor_ids(db, p.location_id):
-            if loc_id in levels:
-                idx = levels[loc_id] + loc_level_offset
-                best = names[idx] if idx < len(names) else "other"
-                break
-        options.append(PointOption(
-            id=p.id, name=p.name, type=p.type.value, location_path=location_path(db, p.location_id),
-            distance_km=round(distance_km(d.pickup_lat, d.pickup_lng, p.lat, p.lng), 1),
-            match=best, same_day_food=p.same_day_food, items_30d=items_30d(db, p.id),
-        ))
-    order = {"same_area": 0, "same_region": 1, "same_city": 2, "same_province": 3, "other": 4}
-    options.sort(key=lambda o: (order[o.match], o.distance_km))
-    return options[:limit]
 
 
 def check_location(db: Session, location_id: uuid.UUID) -> Location:

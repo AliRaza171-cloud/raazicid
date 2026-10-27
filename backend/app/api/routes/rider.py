@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_current_user
 from app.core.errors import api_error
 from app.db.session import get_db
-from app.models import DistributionPoint, Donation, DonationImage, Job, RiderPing, User
+from app.models import Donation, DonationImage, Job, Ngo, RiderPing, User
 from app.models.enums import DonationStatus, ImageKind, JobStatus, RiderStatus, Role, Severity
 from app.schemas.jobs import AvailabilityIn, JobList, JobOut, PingIn, ProofIn, ReasonIn, RiderSummary
 from app.services.donations import change_status
@@ -65,9 +65,7 @@ def my_jobs(
     db: Session = Depends(get_db),
 ):
     if filter == "current":
-        # Active jobs, plus delivered ones still waiting for their hand-out record
-        waiting = select(Donation.id).where(Donation.status == DonationStatus.at_point)
-        cond = Job.status.in_(ACTIVE_JOB) | ((Job.status == JobStatus.delivered) & Job.donation_id.in_(waiting))
+        cond = Job.status.in_(ACTIVE_JOB)
         order = Job.created_at.asc()
     else:
         cond = Job.status.notin_(ACTIVE_JOB)
@@ -134,19 +132,25 @@ def picked_up(job_id: uuid.UUID, body: ProofIn, rider: User = Depends(approved_r
 
 @router.post("/jobs/{job_id}/deliver", response_model=JobOut)
 def delivered(job_id: uuid.UUID, body: ProofIn, rider: User = Depends(approved_rider), db: Session = Depends(get_db)):
-    """Photo of the items at the distribution point, with GPS. Far from the point -> flag for an admin."""
+    """Photo of the items handed to the NGO, with GPS: the last step. Far from the NGO -> flag for an admin.
+    When we only knew the NGO's city, the delivery GPS becomes its location for next time."""
     job = _my_job(db, job_id, rider)
     _need(job, JobStatus.picked_up)
     d = db.get(Donation, job.donation_id)
-    point = db.get(DistributionPoint, d.point_id)
+    ngo = db.get(Ngo, d.ngo_id) if d.ngo_id else None
     _save_proof(db, job, rider, d, ImageKind.delivery_proof, body)
-    far = distance_km(body.lat, body.lng, point.lat, point.lng)
-    if far > FAR_KM:
-        raise_flag(db, "far_from_point", Severity.high, "job", job.id,
-                   {"distance_km": round(far, 2), "donation_id": str(d.id), "point_id": str(point.id), "rider_id": str(rider.id)})
+    if ngo is None:
+        pass   # a donation already on its way when distribution points were replaced by NGOs
+    elif ngo.location_approx:
+        ngo.lat, ngo.lng, ngo.location_approx = body.lat, body.lng, False
+    else:
+        far = distance_km(body.lat, body.lng, ngo.lat, ngo.lng)
+        if far > FAR_KM:
+            raise_flag(db, "far_from_ngo", Severity.high, "job", job.id,
+                       {"distance_km": round(far, 2), "donation_id": str(d.id), "ngo_id": str(ngo.id), "rider_id": str(rider.id)})
     job.status = JobStatus.delivered
     job.delivered_at = datetime.now(timezone.utc)
-    change_status(db, d, DonationStatus.at_point, rider, body.note or f"Delivered to {point.name}")
+    change_status(db, d, DonationStatus.delivered, rider, body.note or f"Delivered to {ngo.name if ngo else 'the NGO'}")
     db.commit()
     return job_out(db, job)
 

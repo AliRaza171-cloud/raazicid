@@ -82,13 +82,7 @@ export default function JobsScreen() {
     }
   };
 
-  const open = (job: Job) => {
-    if (job.status === "delivered") {
-      navigation.navigate("HandOut", { donationId: job.donation_id, quantity: job.quantity, title: job.title, pointName: job.point?.name });
-    } else {
-      navigation.navigate("ActiveJob", { jobId: job.id });
-    }
-  };
+  const open = (job: Job) => navigation.navigate("ActiveJob", { jobId: job.id });
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
@@ -143,7 +137,7 @@ export default function JobsScreen() {
                 </Text>
                 <Text style={st.meta}>
                   <Text style={st.metaLabel}>Drop-off  </Text>
-                  {job.point ? `${job.point.name}, ${job.point.area.slice(-1)[0] ?? ""}` : "–"}
+                  {job.ngo ? `${job.ngo.name}, ${job.ngo.area.slice(-1)[0] ?? ""}` : "–"}
                 </Text>
               </View>
               {job.status === "assigned" ? (

@@ -37,7 +37,7 @@ export default function TrackingScreen() {
     ? {
         markers: [
           { lat: t.pickup.lat, lng: t.pickup.lng, label: "Pickup", kind: "pickup" as const },
-          ...(t.point ? [{ lat: t.point.lat, lng: t.point.lng, label: t.point.name ?? "Distribution point", kind: "point" as const }] : []),
+          ...(t.ngo && !t.ngo.approx ? [{ lat: t.ngo.lat, lng: t.ngo.lng, label: t.ngo.name ?? "NGO", kind: "ngo" as const }] : []),
           ...(t.last ? [{ lat: t.last.lat, lng: t.last.lng, label: t.rider?.full_name ?? "Rider", kind: "rider" as const }] : []),
         ],
         path: t.path,
@@ -49,7 +49,7 @@ export default function TrackingScreen() {
     : t.donation_status === "rider_assigned"
       ? t.job_status === "assigned" ? "A rider has been assigned" : "The rider is coming to you"
       : t.donation_status === "picked_up"
-        ? `On the way to ${t.point?.name ?? "the distribution point"}`
+        ? `On the way to ${t.ngo?.name ?? "the NGO"}`
         : STATUS[t.donation_status].label;
 
   return (
@@ -58,7 +58,7 @@ export default function TrackingScreen() {
       <MapView data={map} />
       <View style={{ flexDirection: "row", gap: 14, flexWrap: "wrap" }}>
         <Legend color={colors.primary} label="Pickup" />
-        <Legend color="#2449A8" label="Distribution point" />
+        <Legend color="#2449A8" label="NGO" />
         <Legend color={colors.rider} label="Rider" />
       </View>
       <ErrorBox message={error} />
@@ -77,9 +77,9 @@ export default function TrackingScreen() {
           <Button label="Call rider" variant="outline" onPress={() => Linking.openURL(`tel:${t.rider!.phone}`)} />
         </View>
       ) : null}
-      {t?.point ? (
-        <Button label={`Where it goes: ${t.point.name ?? "distribution point"}`} variant="outline"
-          onPress={() => Linking.openURL(placeUrl(t.point!.lat, t.point!.lng))} />
+      {t?.ngo && !t.ngo.approx ? (
+        <Button label={`Where it goes: ${t.ngo.name ?? "the NGO"}`} variant="outline"
+          onPress={() => Linking.openURL(placeUrl(t.ngo!.lat, t.ngo!.lng))} />
       ) : null}
       <Text style={{ fontSize: 12, color: colors.muted }}>Updates every 15 seconds. The rider's location is shared only while their job screen is open.</Text>
     </ScrollView>

@@ -34,7 +34,7 @@ export default function DonationsScreen() {
   );
 
   const note = (d: DonationListItem) =>
-    d.status === "accepted" && d.point_name ? `Going to ${d.point_name}` : d.status === "in_review" ? "We are reviewing it" : null;
+    d.status === "accepted" && d.ngo_name ? `Going to ${d.ngo_name}` : d.status === "in_review" ? "We are reviewing it" : null;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>

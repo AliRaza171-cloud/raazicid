@@ -4,7 +4,7 @@ import { View } from "react-native";
 import { WebView } from "react-native-webview";
 import { colors } from "../theme";
 
-export type MapMarker = { lat: number; lng: number; label: string; kind: "pickup" | "point" | "rider" };
+export type MapMarker = { lat: number; lng: number; label: string; kind: "pickup" | "ngo" | "rider" };
 export type MapData = { markers: MapMarker[]; path: { lat: number; lng: number }[] };
 
 const HTML = `<!doctype html><html><head>
@@ -24,7 +24,7 @@ osm.on('tileerror', function () {
 });
 osm.addTo(map);
 var layer = L.layerGroup().addTo(map), first = true;
-var COLORS = { pickup: '#0F6B5C', point: '#2449A8', rider: '#D97706' };
+var COLORS = { pickup: '#0F6B5C', ngo: '#2449A8', rider: '#D97706' };
 window.update = function (data) {
   layer.clearLayers();
   var pts = [];

@@ -7,7 +7,6 @@ strong signal). Signals:
   Staple price rise over ~3 months         >=20% 60 · >=10% 45   (grocery; food a bit lower)
   Poverty headcount (province)             >=40% 40 · >=25% 25   (grocery, food, clothes, school, hygiene)
   Disaster alert in the area (30 days)     severe 90 · moderate 65 · watch 40; unconfirmed x0.8
-  Open requests at a distribution point    40, or 60 if 50+ items asked for
   People in need (OCHA, by sector)         share >=40% 85 · >=25% 65 · >=10% 45; or 500k+ 75 · 100k+ 60 · 20k+ 40
   Rainfall vs long-term average (3 months) supporting only: 25 when 100%+ more AND 50+ mm extra (flood risk), or
                                            60%+ less where 30+ mm usually falls (drought risk); last 45 days only.
@@ -37,9 +36,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models import (AlertNeed, Category, DisasterAlert, DistributionPoint, Location, NeedIndicator, NeedLevel, PointRequest,
+from app.models import (AlertNeed, Category, DisasterAlert, Location, NeedIndicator, NeedLevel,
                         Report)
-from app.models.enums import AlertSeverity, AlertStatus, ReportStatus, RequestStatus
+from app.models.enums import AlertSeverity, AlertStatus, ReportStatus
 from app.services.locations import descendant_ids
 from app.services.relief import alert_slugs, recommend
 from app.services.sources.ai_needs import shows_gap
@@ -70,8 +69,6 @@ def score_alert(severity: AlertSeverity, confirmed: bool) -> int:
     return round(ALERT_SCORE[severity] * (1 if confirmed else 0.8))
 
 
-def score_requests(quantity: int) -> int:
-    return 60 if quantity >= 50 else 40
 
 
 def score_pin(people: float, share: Optional[float]) -> int:
@@ -320,18 +317,6 @@ def recompute(db: Session) -> int:
             started = (a.started_at or a.created_at).date()
             for slug, weight in alert_slugs(a.type, datetime.now(timezone.utc).date(), started).items():
                 add(loc.id, slug, round(score_alert(a.severity, confirmed) * weight), r)
-
-    by_id = {c.id: c.slug for c in db.scalars(select(Category))}
-    reqs: dict[tuple, list] = defaultdict(lambda: [0, 0, None])
-    for req, point in db.execute(select(PointRequest, DistributionPoint).join(DistributionPoint, DistributionPoint.id == PointRequest.point_id)
-                                 .where(PointRequest.status == RequestStatus.open)):
-        k = (point.location_id, req.category_id)
-        reqs[k][0] += req.quantity
-        reqs[k][1] += 1
-        reqs[k][2] = point.name
-    for (loc, cid), (qty, n, pname) in reqs.items():
-        r = {"why": f"People at our point {pname} asked for {qty} of these.", "source": "Request at our distribution point", "date": None}
-        add(loc, by_id.get(cid, ""), score_requests(qty), r)
 
     db.execute(delete(NeedLevel))
     now = datetime.now(timezone.utc)

@@ -1,4 +1,4 @@
-import type { DonationStatus, PointType } from "./api";
+import type { DonationStatus } from "./api";
 
 export const STATUS: Record<DonationStatus, { label: string; chip: string }> = {
   in_review: { label: "In review", chip: "warn" },
@@ -6,20 +6,9 @@ export const STATUS: Record<DonationStatus, { label: string; chip: string }> = {
   rejected: { label: "Rejected", chip: "bad" },
   rider_assigned: { label: "Rider assigned", chip: "info" },
   picked_up: { label: "Picked up", chip: "info" },
-  at_point: { label: "At point", chip: "info" },
-  handed_out: { label: "Handed out", chip: "solid" },
+  delivered: { label: "Delivered to NGO", chip: "solid" },
   cancelled: { label: "Cancelled", chip: "wait" },
 };
-
-export const POINT_TYPES: { value: PointType; label: string }[] = [
-  { value: "mosque", label: "Mosque" },
-  { value: "school", label: "School" },
-  { value: "community_centre", label: "Community centre" },
-  { value: "relief_camp", label: "Relief camp" },
-  { value: "other", label: "Other" },
-];
-
-export const pointTypeLabel = (t: string) => POINT_TYPES.find((p) => p.value === t)?.label ?? t;
 
 export const date = (iso: string) => new Date(iso).toLocaleDateString("en-PK", { day: "numeric", month: "short", year: "numeric" });
 

@@ -20,7 +20,7 @@ type Params = {
 
 const FAR_KM = 1;
 
-/** Camera photo + GPS as proof of pickup (at the donor) or delivery (at the distribution point). */
+/** Camera photo + GPS as proof of pickup (at the donor) or delivery (handed to the NGO: the last step). */
 export default function ProofScreen() {
   const navigation = useNavigation<any>();
   const { params } = useRoute<any>() as { params: Params };
@@ -33,6 +33,7 @@ export default function ProofScreen() {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
 
   const shoot = async () => {
     setError(null);
@@ -59,14 +60,14 @@ export default function ProofScreen() {
     setError(null);
     try {
       const url = await uploadPhoto(photo, "proof_photo");
-      const job = await api<{ donation_id: string }>(`/rider/jobs/${params.jobId}/${pickup ? "pickup" : "deliver"}`, {
+      await api(`/rider/jobs/${params.jobId}/${pickup ? "pickup" : "deliver"}`, {
         method: "POST",
         body: JSON.stringify({ photo_url: url, lat: coords.lat, lng: coords.lng, note: note.trim() || null }),
       });
       if (pickup) {
         navigation.goBack();
       } else {
-        navigation.replace("HandOut", { donationId: job.donation_id, quantity: params.quantity, title: params.title, pointName: params.placeName });
+        setDone(true);   // delivered: the job is finished
       }
     } catch (e) {
       setError((e as Error).message);
@@ -74,6 +75,18 @@ export default function ProofScreen() {
       setBusy(false);
     }
   };
+
+  if (done) {
+    return (
+      <Screen title="Delivered" sub={`${params.title} · ${params.placeName}`} edges={["bottom"]}>
+        <View style={{ backgroundColor: colors.primarySoft, borderRadius: 14, padding: 14, gap: 6 }}>
+          <Text style={{ fontWeight: "800", color: colors.primaryDark, fontSize: 16 }}>Thank you! The job is done.</Text>
+          <Text style={{ color: colors.ink2 }}>{params.placeName} will give the items to people in need. The donor has been told.</Text>
+        </View>
+        <Button label="Back to my jobs" onPress={() => navigation.navigate("RiderTabs", { screen: "Jobs" })} />
+      </Screen>
+    );
+  }
 
   return (
     <Screen title={pickup ? "Confirm pickup" : "Confirm delivery"} sub={`${params.title} · at ${params.placeName}`} edges={["bottom"]}>
@@ -89,7 +102,7 @@ export default function ProofScreen() {
           ? `Photo taken ${takenAt?.toLocaleTimeString("en-PK", { hour: "numeric", minute: "2-digit" })}${coords ? " · location saved" : " · getting location…"} · tap to retake`
           : pickup
             ? "Show all the items with the donor's place in the background."
-            : "Show the items at the distribution point."}
+            : "Show the items with the NGO's office or sign in the background."}
       </Text>
 
       {far !== null && far > FAR_KM ? (
@@ -102,8 +115,8 @@ export default function ProofScreen() {
       ) : null}
 
       <Check value={allItems} onChange={setAllItems} label={`All ${params.quantity} item${params.quantity === 1 ? "" : "s"} ${pickup ? "collected" : "handed over"}`} />
-      {!pickup ? <Check value={received} onChange={setReceived} label="The point contact received them" /> : null}
-      <Field label="Note (optional)" value={note} onChangeText={setNote} placeholder={pickup ? "e.g. 2 bags, 1 box" : "Received by…"} maxLength={300} />
+      {!pickup ? <Check value={received} onChange={setReceived} label="Someone at the NGO received them" /> : null}
+      <Field label="Note (optional)" value={note} onChangeText={setNote} placeholder={pickup ? "e.g. 2 bags, 1 box" : "Received by (name at the NGO)…"} maxLength={300} />
 
       <ErrorBox message={error} />
       <Button label={pickup ? "Confirm pickup" : "Confirm delivery"} onPress={confirm} loading={busy} disabled={!ready} />

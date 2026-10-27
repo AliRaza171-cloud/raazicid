@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { PageHeader } from "../components/Layout";
-import { api, type Category, type Donation, type PointOption, type RiderOption } from "../lib/api";
-import { STATUS, dateTime, pointTypeLabel, urgencyChip, windowText } from "../lib/format";
+import { api, type Category, type Donation, type NgoOption, type NgoSearch, type RiderOption } from "../lib/api";
+import { STATUS, dateTime, urgencyChip, windowText } from "../lib/format";
 
-const PROOF = { pickup_proof: "Pickup", delivery_proof: "At the point", distribution_proof: "Hand-out" } as const;
+const PROOF = { pickup_proof: "Pickup", delivery_proof: "Handed to the NGO" } as const;
 
-const MATCH: Record<PointOption["match"], string> = {
+const MATCH: Record<NgoOption["match"], string> = {
   same_area: "Same area",
   same_region: "Same region",
   same_city: "Same city",
@@ -17,8 +17,9 @@ const MATCH: Record<PointOption["match"], string> = {
 export default function DonationDetail() {
   const { id } = useParams();
   const [d, setD] = useState<Donation | null>(null);
-  const [options, setOptions] = useState<PointOption[] | null>(null);
-  const [pointId, setPointId] = useState<string>("");
+  const [options, setOptions] = useState<NgoOption[] | null>(null);
+  const [ngoId, setNgoId] = useState<string>("");
+  const [searching, setSearching] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -30,9 +31,6 @@ export default function DonationDetail() {
   const [riderId, setRiderId] = useState("");
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
-  const [hoQty, setHoQty] = useState("");
-  const [hoFamilies, setHoFamilies] = useState("");
-  const [hoNote, setHoNote] = useState("");
 
   const load = useCallback(() => {
     api<Donation>(`/donations/${id}`)
@@ -46,12 +44,11 @@ export default function DonationDetail() {
             })
             .catch((e) => setError(e.message));
         }
-        if (data.status === "at_point") setHoQty(String(data.quantity));
         if (data.status === "in_review") {
-          api<PointOption[]>(`/admin/donations/${id}/point-options`)
+          api<NgoOption[]>(`/admin/donations/${id}/ngo-options`)
             .then((opts) => {
               setOptions(opts);
-              setPointId(opts[0]?.id ?? "");
+              setNgoId(opts[0]?.id ?? "");
             })
             .catch((e) => setError(e.message));
         }
@@ -68,9 +65,9 @@ export default function DonationDetail() {
     setBusy(true);
     setError(null);
     try {
-      const out = await api<Donation>(`/admin/donations/${id}/accept`, { method: "POST", body: JSON.stringify({ point_id: pointId }) });
+      const out = await api<Donation>(`/admin/donations/${id}/accept`, { method: "POST", body: JSON.stringify({ ngo_id: ngoId }) });
       setD(out);
-      setFlash(`Accepted. Going to ${out.point?.name}. The donor has been told.`);
+      setFlash(`Accepted. Our rider will take it to ${out.ngo?.name}. The donor has been told.`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -117,20 +114,22 @@ export default function DonationDetail() {
       return "Job cancelled. Choose another rider.";
     });
 
-  const handOut = async () => {
-    setBusy(true);
+  const city = d ? d.pickup.location_path[Math.min(1, d.pickup.location_path.length - 1)] : "";
+  const searchWeb = async () => {
+    if (!d) return;
+    setSearching(true);
     setError(null);
     try {
-      const out = await api<Donation>(`/donations/${id}/hand-out`, {
-        method: "POST",
-        body: JSON.stringify({ quantity: Number(hoQty), families_served: hoFamilies ? Number(hoFamilies) : null, note: hoNote.trim() || null }),
-      });
-      setD(out);
-      setFlash("Hand-out recorded. The donor has been told.");
+      // the pickup's city: the backend widens an area or district to its city
+      const r = await api<NgoSearch>("/admin/ngos/search", { method: "POST", body: JSON.stringify({ location_id: d.pickup.location_id, category_id: d.category.id }) });
+      setFlash(r.status);
+      const opts = await api<NgoOption[]>(`/admin/donations/${id}/ngo-options`);
+      setOptions(opts);
+      setNgoId(opts[0]?.id ?? "");
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      setBusy(false);
+      setSearching(false);
     }
   };
 
@@ -217,13 +216,15 @@ export default function DonationDetail() {
                 <dd style={{ margin: 0 }}>
                   {d.donor.full_name} · {d.donor.phone} · {d.donor.donations_count} donation{d.donor.donations_count === 1 ? "" : "s"}
                 </dd>
-                {d.point && (
+                {d.ngo && (
                   <>
-                    <dt className="muted">Going to</dt>
+                    <dt className="muted">{d.status === "delivered" ? "Delivered to" : "Going to"}</dt>
                     <dd style={{ margin: 0 }}>
-                      <strong>{d.point.name}</strong>
-                      <div className="muted small">{d.point.address} · {d.point.location_path.slice(-2).join(", ")}</div>
-                      <a className="small" href={`https://www.google.com/maps?q=${d.point.lat},${d.point.lng}`} target="_blank" rel="noreferrer">Open in Google Maps</a>
+                      <strong>{d.ngo.name}</strong>
+                      <div className="muted small">{d.ngo.address} · {d.ngo.location_path.slice(-2).join(", ")}{d.ngo.phone ? ` · ${d.ngo.phone}` : ""}</div>
+                      {d.ngo.location_approx
+                        ? <span className="small" style={{ color: "var(--warn)" }}>Office not on the map yet: the rider should call the NGO.</span>
+                        : <a className="small" href={`https://www.google.com/maps?q=${d.ngo.lat},${d.ngo.lng}`} target="_blank" rel="noreferrer">Open in Google Maps</a>}
                     </dd>
                   </>
                 )}
@@ -275,19 +276,6 @@ export default function DonationDetail() {
               </section>
             )}
 
-            {d.hand_out && (
-              <section className="card">
-                <h2 style={{ margin: "0 0 6px", fontSize: 16 }}>Hand-out</h2>
-                <p style={{ margin: 0 }}>
-                  <strong>{d.hand_out.quantity}</strong> of {d.quantity} handed out
-                  {d.hand_out.families_served ? <> to <strong>{d.hand_out.families_served}</strong> families</> : null} at {d.point?.name}.
-                </p>
-                <p className="muted small" style={{ margin: "4px 0 0" }}>
-                  Recorded by {d.hand_out.by_name} · {dateTime(d.hand_out.at)}{d.hand_out.note ? ` · ${d.hand_out.note}` : ""}
-                </p>
-              </section>
-            )}
-
             <section className="card">
               <h2 style={{ margin: "0 0 10px", fontSize: 16 }}>History</h2>
               <ol style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -307,42 +295,46 @@ export default function DonationDetail() {
             {d.status === "in_review" ? (
               <>
                 <div>
-                  <h2 style={{ margin: 0, fontSize: 16 }}>Where should it go?</h2>
-                  <p className="muted small" style={{ margin: "4px 0 0" }}>Open points that take this category, nearest area first. Area need is added to this ranking in Phase 6.</p>
+                  <h2 style={{ margin: 0, fontSize: 16 }}>Which NGO should get it?</h2>
+                  <p className="muted small" style={{ margin: "4px 0 0" }}>Our rider picks it up and drops it at the NGO. NGOs that take {d.category.name.toLowerCase()}{d.food_type === "cooked" ? " and cooked food" : ""}, nearest first.</p>
                 </div>
                 {options === null ? (
-                  <p className="muted">Loading points…</p>
+                  <p className="muted">Loading NGOs…</p>
                 ) : options.length === 0 ? (
                   <div className="flash bad">
-                    No open point can take this donation. <Link to="/points">Add or open a distribution point</Link>
-                    {d.food_type === "cooked" ? " that can hand out cooked food the same day." : "."}
+                    We know no NGO near {city} that takes this{d.food_type === "cooked" ? " cooked food" : ""}. Search the web, or <Link to="/ngos">add one you know</Link>.
                   </div>
                 ) : (
-                  <div role="radiogroup" aria-label="Distribution point" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div role="radiogroup" aria-label="NGO" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {options.map((o) => (
                       <label
                         key={o.id}
                         style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: 12, margin: 0, borderRadius: 10, cursor: "pointer", fontWeight: 400,
-                          border: pointId === o.id ? "2px solid var(--green-700)" : "1px solid var(--line-2)", background: pointId === o.id ? "var(--green-50)" : "#fff" }}
+                          border: ngoId === o.id ? "2px solid var(--green-700)" : "1px solid var(--line-2)", background: ngoId === o.id ? "var(--green-50)" : "#fff" }}
                       >
-                        <input type="radio" name="point" value={o.id} checked={pointId === o.id} onChange={() => setPointId(o.id)} style={{ marginTop: 3 }} />
+                        <input type="radio" name="ngo" value={o.id} checked={ngoId === o.id} onChange={() => setNgoId(o.id)} style={{ marginTop: 3 }} />
                         <span style={{ flex: 1 }}>
                           <strong style={{ color: "var(--ink)" }}>{o.name}</strong>
                           <span className="muted small" style={{ display: "block" }}>
-                            {pointTypeLabel(o.type)} · {o.location_path.slice(-2).join(", ")}
+                            {o.address} · {o.location_path.slice(-2).join(", ")}{o.phone ? ` · ${o.phone}` : ""}
                           </span>
                           <span className="small" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-                            <span className={`chip ${o.match === "same_area" ? "ok" : "wait"}`}>{MATCH[o.match]}</span>
-                            <span className="chip wait">{o.distance_km} km</span>
-                            <span className="chip wait">{o.items_30d} items / 30 days</span>
+                            <span className={`chip ${o.match === "same_area" || o.match === "same_city" ? "ok" : "wait"}`}>{MATCH[o.match]}</span>
+                            <span className="chip wait">{o.location_approx ? "distance not known" : `${o.distance_km} km`}</span>
+                            <span className="chip wait">{o.items_30d} donations / 30 days</span>
+                            {o.found_by === "web_search" && <span className="chip wait" title="Found by web search: call them first">From the web</span>}
                           </span>
+                          {o.source_url && <a className="small" href={o.source_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Where we found it</a>}
                         </span>
                       </label>
                     ))}
                   </div>
                 )}
-                <button className="btn" disabled={busy || !pointId} onClick={accept}>
-                  {busy && !rejecting ? "Saving…" : "Accept and send to this point"}
+                <button className="btn ghost" disabled={searching} onClick={searchWeb}>
+                  {searching ? `Searching the web for NGOs in ${city}… (1–3 min)` : `Search the web for NGOs in ${city}`}
+                </button>
+                <button className="btn" disabled={busy || !ngoId} onClick={accept}>
+                  {busy && !rejecting ? "Saving…" : "Accept and send to this NGO"}
                 </button>
 
                 {!rejecting ? (
@@ -406,7 +398,7 @@ export default function DonationDetail() {
               </>
             ) : (d.status === "rider_assigned" || d.status === "picked_up") && d.job ? (
               <>
-                <h2 style={{ margin: 0, fontSize: 16 }}>{d.status === "picked_up" ? "On the way to the point" : d.job.status === "assigned" ? "Waiting for the rider to accept" : "Rider going to pickup"}</h2>
+                <h2 style={{ margin: 0, fontSize: 16 }}>{d.status === "picked_up" ? `On the way to ${d.ngo?.name ?? "the NGO"}` : d.job.status === "assigned" ? "Waiting for the rider to accept" : "Rider going to pickup"}</h2>
                 <div>
                   <strong>{d.job.rider_name}</strong>
                   <div className="muted small">{d.job.vehicle} · {d.job.rider_phone} · assigned {dateTime(d.job.assigned_at)}</div>
@@ -430,25 +422,10 @@ export default function DonationDetail() {
                   )
                 )}
               </>
-            ) : d.status === "at_point" ? (
+            ) : d.status === "delivered" ? (
               <>
-                <div>
-                  <h2 style={{ margin: 0, fontSize: 16 }}>Record the hand-out</h2>
-                  <p className="muted small" style={{ margin: "4px 0 0" }}>When our team gives the items to families at {d.point?.name}. The rider can also do this in the app.</p>
-                </div>
-                <div>
-                  <label htmlFor="hoq">How many were handed out? (of {d.quantity})</label>
-                  <input id="hoq" className="input" type="number" min={1} max={d.quantity} value={hoQty} onChange={(e) => setHoQty(e.target.value)} />
-                </div>
-                <div>
-                  <label htmlFor="hof">How many families?</label>
-                  <input id="hof" className="input" type="number" min={0} value={hoFamilies} onChange={(e) => setHoFamilies(e.target.value)} placeholder="e.g. 8" />
-                </div>
-                <div>
-                  <label htmlFor="hon">Note (optional)</label>
-                  <input id="hon" className="input" value={hoNote} onChange={(e) => setHoNote(e.target.value)} placeholder="e.g. Given after Jumma prayers" />
-                </div>
-                <button className="btn" disabled={busy || !hoQty || Number(hoQty) < 1} onClick={handOut}>{busy ? "Saving…" : "Save hand-out"}</button>
+                <h2 style={{ margin: 0, fontSize: 16 }}>Delivered to {d.ngo?.name ?? "the NGO"}</h2>
+                <p className="muted" style={{ margin: 0 }}>Done: the NGO gives the items to people in need. The rider's photo at the NGO is under Proof photos.</p>
               </>
             ) : (
               <>

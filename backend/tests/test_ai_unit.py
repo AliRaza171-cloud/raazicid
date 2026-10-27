@@ -46,18 +46,18 @@ def test_vehicle_fit():
 
 def test_food_urgency_rules():
     assert food_urgency(False, None, None, 10, NOW) == (None, [])
-    score, reasons = food_urgency(True, FoodType.cooked, NOW - timedelta(hours=2), 40, NOW, point_distance_km=1.8)
+    score, reasons = food_urgency(True, FoodType.cooked, NOW - timedelta(hours=2), 40, NOW, ngo_distance_km=1.8)
     assert [p for _, p in reasons] == [35, 25, 14, 12] and score == 86
-    dry, _ = food_urgency(True, FoodType.dry, None, 5, NOW, point_distance_km=1.0)
+    dry, _ = food_urgency(True, FoodType.dry, None, 5, NOW, ngo_distance_km=1.0)
     assert dry == 7   # no distance points for dry food
 
 
 def test_food_urgency_warning_and_cap():
-    score, reasons = food_urgency(True, FoodType.cooked, NOW - timedelta(hours=9), 200, NOW, point_distance_km=0.5)
+    score, reasons = food_urgency(True, FoodType.cooked, NOW - timedelta(hours=9), 200, NOW, ngo_distance_km=0.5)
     assert score == 100   # capped
     assert any("Warning" in label for label, _ in reasons)
-    _, no_point = food_urgency(True, FoodType.cooked, NOW, 5, NOW, point_distance_km=None)
-    assert no_point[-1] == ("No open point for cooked food yet", 0)
+    _, no_ngo = food_urgency(True, FoodType.cooked, NOW, 5, NOW, ngo_distance_km=None)
+    assert no_ngo[-1] == ("No NGO for cooked food known yet", 0)
 
 
 def test_classifier_without_model(tmp_path):

@@ -8,8 +8,7 @@ export const STATUS: Record<DonationStatus, { label: string; fg: string; bg: str
   rejected: { label: "Not accepted", fg: colors.urgent, bg: colors.urgentSoft },
   rider_assigned: { label: "Rider assigned", fg: colors.primaryDark, bg: colors.primarySoft },
   picked_up: { label: "Picked up", fg: colors.primaryDark, bg: colors.primarySoft },
-  at_point: { label: "At the point", fg: colors.primaryDark, bg: colors.primarySoft },
-  handed_out: { label: "Handed out", fg: "#fff", bg: colors.primary },
+  delivered: { label: "Delivered to NGO", fg: "#fff", bg: colors.primary },
   cancelled: { label: "Cancelled", fg: colors.muted, bg: colors.line },
 };
 

@@ -148,9 +148,9 @@ function AlertCard({ a, onDonate }: { a: DisasterAlert; onDonate: (categoryId: n
           </View>
         ) : null}
 
-        {a.camps.filter((c) => c.is_active).length ? (
+        {a.ngos.length ? (
           <Text style={{ color: colors.primaryDark, fontWeight: "600" }}>
-            Relief camp{a.camps.length > 1 ? "s" : ""}: {a.camps.filter((c) => c.is_active).map((c) => c.name).join(", ")}
+            Our riders take donations to: {a.ngos.slice(0, 3).map((n) => n.name).join(", ")}{a.ngos.length > 3 ? " and others" : ""}
           </Text>
         ) : null}
 

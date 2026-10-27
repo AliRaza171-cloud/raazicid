@@ -1,4 +1,4 @@
-"""Admin: donations table, accept (choose a distribution point) or reject."""
+"""Admin: donations table, accept (choose the NGO our rider will drop it at) or reject."""
 
 import uuid
 from typing import Literal, Optional
@@ -10,16 +10,15 @@ from sqlalchemy.orm import Session
 from app.core.deps import require_roles
 from app.core.errors import api_error
 from app.db.session import get_db
-from app.models import DistributionPoint, Donation, Job, User
+from app.models import Donation, Job, Ngo, User
 from app.models.enums import DonationStatus, JobStatus, RiderStatus, Role
-from app.schemas.donations import AcceptIn, DonationCounts, DonationList, DonationOut, PointOption, RejectIn
+from app.schemas.donations import AcceptIn, DonationCounts, DonationList, DonationOut, NgoOption, RejectIn
 from app.schemas.jobs import AdminTrackingItem, AssignIn, ReasonIn, RiderOption
 from app.services.accounts import notify
-from app.services.donations import (
-    change_status, current_job, donation_out, list_item, point_options, point_takes, refresh_urgency,
-)
+from app.services.donations import change_status, current_job, donation_out, list_item, refresh_urgency
 from app.services.jobs import admin_tracking, rider_options, rider_score
 from app.services.locations import descendant_ids
+from app.services.ngos import ngo_options, ngo_takes
 
 router = APIRouter(prefix="/admin/donations", tags=["admin: donations"])
 admin_only = require_roles(Role.admin)
@@ -73,22 +72,23 @@ def _get(db: Session, donation_id: uuid.UUID) -> Donation:
     return d
 
 
-@router.get("/{donation_id}/point-options", response_model=list[PointOption])
+@router.get("/{donation_id}/ngo-options", response_model=list[NgoOption])
 def options(donation_id: uuid.UUID, _: User = Depends(admin_only), db: Session = Depends(get_db)):
-    return point_options(db, _get(db, donation_id))
+    """NGOs we know that take this donation, same city first. Empty? Search the web: POST /admin/ngos/search."""
+    return ngo_options(db, _get(db, donation_id))
 
 
 @router.post("/{donation_id}/accept", response_model=DonationOut)
 def accept(donation_id: uuid.UUID, body: AcceptIn, admin: User = Depends(admin_only), db: Session = Depends(get_db)):
     d = _get(db, donation_id)
-    point = db.get(DistributionPoint, body.point_id)
-    if point is None:
-        raise api_error(404, "point_not_found", "Distribution point not found")
-    reason = point_takes(point, d)
+    ngo = db.get(Ngo, body.ngo_id)
+    if ngo is None:
+        raise api_error(404, "ngo_not_found", "NGO not found")
+    reason = ngo_takes(ngo, d)
     if reason:
-        raise api_error(409, "point_cannot_take", reason)
-    d.point_id = point.id   # set before the move so the donor's message names the point
-    change_status(db, d, DonationStatus.accepted, admin, f"Going to {point.name}")
+        raise api_error(409, "ngo_cannot_take", reason)
+    d.ngo_id = ngo.id
+    change_status(db, d, DonationStatus.accepted, admin, f"Going to {ngo.name}")
     db.commit()
     db.refresh(d)
     return donation_out(db, d)

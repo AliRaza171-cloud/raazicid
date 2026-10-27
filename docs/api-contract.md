@@ -153,35 +153,38 @@ no score and sort after food. Phase 5 adds pickup distance.
 Every status move writes a `status_changes` row and notifies the donor (accepted, rejected, and
 the Phase 4 rider steps).
 
-## Distribution points [Phase 3, built]
+## NGOs [Phase 3, changed Oct 2026]
+
+RAAZICID does not hand out donations itself. Riders drop each donation at an NGO, charity or welfare trust in the
+donor's city, which gives it to people in need. NGOs are found with a web search or added by an admin; there are no
+NGO accounts and no verification step (call an NGO found on the web before the first delivery).
 
 | Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/points?location_id=&category_id=&open_only=` | admin, approved rider | List; riders only see open points |
-| GET | `/points/{id}` | admin, approved rider | Point + its requests |
-| POST | `/admin/points` | admin | Create |
-| PATCH | `/admin/points/{id}` | admin | Edit any field; `category_ids: []` = accepts everything |
-| POST | `/points/{id}/requests` | admin, approved rider | What people there need: `{ "category_id": 4, "quantity": 50, "note": "…" }` |
-| PATCH | `/admin/point-requests/{id}` | admin | `{ "status": "fulfilled" \| "cancelled" }` |
+| GET | `/admin/ngos?location_id=&category_id=&q=&include_hidden=` | admin | List (a city includes everything under it) |
+| POST | `/admin/ngos` | admin | Add one you know: name, location_id, address, lat, lng, phone?, website?, about?, takes_cooked_food, category_ids (empty = takes everything) |
+| PATCH | `/admin/ngos/{id}` | admin | Edit; moving the pin clears `location_approx`; `is_active: false` hides it |
+| POST | `/admin/ngos/search` | admin | `{ "location_id", "category_id"? }`: web search for NGOs in that place's city (1–3 min, uses AI credit), saved and returned |
+| GET | `/admin/donations/{id}/ngo-options` | admin | NGOs that take this donation, same area / city first, then nearest |
+
+**Web search.** The AI (OpenAI or Claude) searches the web for NGOs with an office in the city that accept donated
+goods and returns name, address, phone, website, what they take (our 12 categories), cooked food yes/no, one line
+about them and the source page. Each address is placed on the map with OpenStreetMap Nominatim (free, one request a
+second); an address it cannot place, or one more than 40 km from the city, gets the city centre and
+`location_approx: true` (the rider is told to call for directions, and the first delivery's GPS becomes its
+location). The same NGO is not added twice (names compared without case or brackets); a repeat search only fills
+empty fields, so an admin's edits stay. `found_by` is `web_search` or `admin`, `source_url` the page it was found on.
 
 ```json
-// POST /admin/points
-{ "name": "Noor Community Point", "type": "mosque", "location_id": "<lyari-id>", "address": "Near Chakiwara Chowk",
-  "lat": 24.866, "lng": 67.0, "contact_name": "Bilal Ahmed", "contact_phone": "0300 1112223",
-  "same_day_food": true, "is_active": true, "closes_at": null, "category_ids": [] }
-// → point with "location_path", "categories": [{id, name}], "items_30d", "open_requests", "requests": []
+// POST /admin/ngos/search {"location_id": "<hyderabad-id>", "category_id": 4}
+{ "place": "Hyderabad", "found": 6, "added": 5, "updated": 1,
+  "status": "Found 6 NGOs in Hyderabad on the web: 5 new, 1 updated. 7 known in Hyderabad now · OpenAI gpt-5.5",
+  "ngos": [{ "id": "…", "name": "…", "address": "Latifabad Unit 7", "lat": 25.39, "lng": 68.37, "location_approx": false,
+             "phone": "022…", "takes_cooked_food": false, "categories": [{"id": 4, "name": "Blankets"}],
+             "found_by": "web_search", "source_url": "https://…", "items_30d": 0, "is_active": true }] }
 ```
 
-A point is open when `is_active` is true and `closes_at` (for temporary relief camps) has not passed.
-
-**Coordinates check.** Create and edit refuse coordinates far from the chosen place (422 `coords_far`, e.g. Karachi
-numbers for a Hyderabad point): more than 60 km from the city centre, or 30 km from a region or area centre, or near a
-city in another province. Send `"allow_far": true` to save anyway. Every point carries `place_warning` (null, or the
-sentence explaining the mismatch), so the Points page flags pins already in the wrong place, and `place_centre`
-(`{name, lat, lng}` of its area, region or city, or null) so the admin map picker opens in the right town. `/locations` now returns
-`lat` and `lng` where we have them, for the "Use the centre of …" button.
-
-## Jobs, tracking, hand-out [Phase 4, built]
+## Jobs, tracking, delivery to the NGO [Phase 4, built]
 
 | Method | Path | Who | What |
 |---|---|---|---|
@@ -191,18 +194,17 @@ sentence explaining the mismatch), so the Points page flags pins already in the 
 | GET | `/admin/tracking` | admin | Every active job with the rider's last GPS point and `stalled` |
 | GET | `/rider/summary` | approved rider | Availability, active jobs, done today / total, rating |
 | PATCH | `/rider/availability` | approved rider | `{ "is_available": true }` |
-| GET | `/rider/jobs?filter=current\|history` | approved rider | Current = assigned, accepted, picked up, and delivered jobs still waiting for their hand-out |
+| GET | `/rider/jobs?filter=current\|history` | approved rider | Current = assigned, accepted and picked up |
 | GET | `/rider/jobs/{id}` | the rider | One job |
 | POST | `/rider/jobs/{id}/accept` | the rider | `assigned` → `accepted`. The donor's phone is shown after this |
 | POST | `/rider/jobs/{id}/decline` | the rider | `{ "reason": "…" }`, before pickup → donation back to `accepted`, admins notified |
 | POST | `/rider/jobs/{id}/pickup` | the rider | `{ "photo_url", "lat", "lng", "note"? }` → job and donation `picked_up` |
-| POST | `/rider/jobs/{id}/deliver` | the rider | `{ "photo_url", "lat", "lng", "note"? }` → job `delivered`, donation `at_point` |
+| POST | `/rider/jobs/{id}/deliver` | the rider | `{ "photo_url", "lat", "lng", "note"? }` at the NGO → job and donation `delivered` (the last step) |
 | POST | `/rider/jobs/{id}/ping` | the rider | `{ "lat", "lng" }` about every 15 s while the job screen is open (204) |
 | GET | `/donations/{id}/tracking` | donor, admin, the rider | Rider, last GPS point, path (last 240 points), `stalled`, pickup and point |
-| POST | `/donations/{id}/hand-out` | admin, the rider who delivered | `{ "quantity", "families_served"?, "photo_url"?, "note"? }` → `handed_out` |
 
 The donation detail (`GET /donations/{id}`) now also has `job` (current rider), `proofs`
-(pickup / delivery / hand-out photos with GPS and `distance_km` from where they should be) and
+(pickup and delivery photos with GPS and `distance_km` from where they should be) and
 `hand_out`.
 
 **Checks**
@@ -210,10 +212,9 @@ The donation detail (`GET /donations/{id}`) now also has `job` (current rider), 
   address raises a `far_from_pickup` flag (medium), and a delivery photo more than 1 km from the point
   raises `far_from_point` (high). The step still goes through; an admin reviews the flag (Phase 8 page).
 - `stalled`: no GPS for 10+ minutes on an accepted or picked-up job.
-- Hand-out quantity cannot be more than the donation's quantity.
 - GPS is shared only while the rider's job screen is open (Expo Go has no background location).
 
-Notifications are saved for the donor at every step (assigned, picked up, at point, handed out),
+Notifications are saved for the donor at every step (assigned, picked up, delivered to the NGO),
 for the rider (new job, job taken off), and for admins (rider declined). The inbox screen and
 `GET /notifications` come with the alerts in Phase 6.
 
@@ -260,7 +261,6 @@ nearest same-day food point and is refreshed while the food waits.
 | POST | `/admin/alerts` | admin | Add an alert by hand (confirmed straight away) |
 | POST | `/admin/alerts/{id}/status` | admin | `{"status": "confirmed" \| "dismissed" \| "handled" \| "unconfirmed"}` |
 | PUT | `/admin/alerts/{id}/needs` | admin | Replace "what is needed": `[{"category_id": 2, "quantity_needed": 150}]` |
-| POST | `/admin/alerts/{id}/camp` | admin | Open a relief camp (temporary distribution point, `alert_id` set) |
 | POST | `/admin/needs/ai-scan` | admin | `{"location_id": <province> \| null}`: AI web scan of the last 90 days for current needs (1–4 min) |
 | GET | `/admin/sources` | admin | Data sources with last run and result |
 | POST | `/admin/sources/{kind}/run` | admin | Fetch now: `gdacs`, `hdx_hapi`, `web_search` (Claude news scan) |
@@ -274,7 +274,6 @@ of 25+. 80+ urgent (3), 55+ high (2), 30+ some (1).
 | Staple price rise over ~3 months (ration; food −10) | HDX HAPI `food-prices-market-monitor` (WFP) | ≥20% 60 · ≥10% 45 |
 | Poverty headcount (ration, food, clothes, school, hygiene) | HDX HAPI `poverty-rate` | ≥40% 40 · ≥25% 25 |
 | Disaster alert, last 30 days (categories by type) | GDACS, Claude web scan, admin | severe 90 · moderate 65 · watch 40; unconfirmed ×0.8 |
-| Open requests at a distribution point | our points | 40, or 60 if 50+ items |
 | People in need, by sector (education → school supplies and books, health / WASH → hygiene, shelter → blankets, household and winter items, food → food and rations…) | OCHA via HDX HAPI `affected-people/humanitarian-needs` | share ≥40% 85 · ≥25% 65 · ≥10% 45; or 500k+ 75 · 100k+ 60 · 20k+ 40 |
 | Rainfall over 3 months vs the long-term average (supporting only) | WFP / CHIRPS via HDX HAPI `climate/rainfall` | 25 when +100% **and** 50+ mm more than usual (flood risk: relief, hygiene, household, blankets), or −60% where 30+ mm usually falls (drought risk: food, rations, hygiene); last 45 days only. Below "some" on its own: it adds +5 to a real need |
 | Displaced people living in the place (relief, rations, food, hygiene, blankets, household) | IOM DTM via HDX HAPI `affected-people/idps` (each operation's latest round) | 100k+ 70 · 20k+ 60 · 5k+ 45 · 1k+ 30 (alone: high at most) |
@@ -315,12 +314,10 @@ left every 2 hours. Long reports are trimmed to the ~40,000 characters that talk
   "children": [{ "id": "…", "name": "Karachi", "level": "city", "lat": 24.86, "lng": 67.0,
                  "has_children": true, "max_level": 3, "needs": [ /* same shape as summary */ ] }],
   "computed_at": "2026-10-25T08:00:00Z" }
-
-// POST /admin/alerts/{id}/camp
-{ "name": "Lyari Relief Camp", "location_id": "…", "address": "Govt school ground", "lat": 24.867, "lng": 67.0,
-  "contact_name": "Bilal", "contact_phone": "03001112223", "open_days": 30 }
-// 201: the new distribution point (type relief_camp, same-day food, categories = the alert's needs)
 ```
+
+Each alert also lists `ngos`: the NGOs we know in the cities of its places (name, city, phone, address), where riders
+can take donations for that disaster; "Find NGOs near …" on the alert runs the same web search as `/admin/ngos/search`.
 
 **Recommended donations.** Every alert has `recommended`: our categories that help with that type of disaster, in
 order, each with `when` (`now` = first days, life-saving; `soon` = next weeks; `later` = recovery), a plain `why`,

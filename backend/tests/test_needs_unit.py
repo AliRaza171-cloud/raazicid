@@ -2,8 +2,7 @@
 
 from app.models.enums import AlertSeverity, AlertType
 from app.services.claude import extract_json, text_and_citations
-from app.services.needs import (combine, families, level_of, score_alert, score_ipc, score_poverty, score_price,
-                                score_requests)
+from app.services.needs import combine, families, level_of, score_alert, score_ipc, score_poverty, score_price
 from app.services.sources import gdacs, webscan
 
 
@@ -19,7 +18,6 @@ def test_signal_scores():
     assert score_poverty(0.45) == 40 and score_poverty(0.30) == 25 and score_poverty(0.1) == 0
     assert score_alert(AlertSeverity.severe, True) == 90
     assert score_alert(AlertSeverity.severe, False) == 72      # not confirmed yet counts less
-    assert score_requests(10) == 40 and score_requests(80) == 60
 
 
 def test_combine_takes_highest_plus_bonus():

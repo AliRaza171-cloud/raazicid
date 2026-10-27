@@ -33,8 +33,8 @@ export default function Tracking() {
     const out: MapMarker[] = [];
     for (const i of items ?? []) {
       if (i.last) out.push({ id: `r-${i.job_id}`, lat: i.last.lat, lng: i.last.lng, label: `${i.rider_name} · ${i.title}`, kind: i.stalled ? "stalled" : "rider" });
-      const dest = i.heading_to === "point" && i.point ? i.point : i.pickup;
-      out.push({ id: `d-${i.job_id}`, lat: dest.lat, lng: dest.lng, label: `${i.heading_to === "point" ? dest.name : "Pickup"} · ${i.title}`, kind: i.heading_to === "point" ? "point" : "pickup" });
+      const dest = i.heading_to === "ngo" && i.ngo ? i.ngo : i.pickup;
+      out.push({ id: `d-${i.job_id}`, lat: dest.lat, lng: dest.lng, label: `${i.heading_to === "ngo" ? dest.name : "Pickup"} · ${i.title}`, kind: i.heading_to === "ngo" ? "ngo" : "pickup" });
     }
     return out;
   }, [items]);
@@ -60,10 +60,10 @@ export default function Tracking() {
                 <div key={i.job_id} style={{ borderTop: "1px solid var(--line)", paddingTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     <strong style={{ flex: 1 }}>{i.title}</strong>
-                    {i.stalled ? <span className="chip bad">Stalled</span> : <span className={`chip ${i.heading_to === "point" ? "info" : "ok"}`}>{i.heading_to === "point" ? "Picked up" : i.job_status === "assigned" ? "Not accepted yet" : "To pickup"}</span>}
+                    {i.stalled ? <span className="chip bad">Stalled</span> : <span className={`chip ${i.heading_to === "ngo" ? "info" : "ok"}`}>{i.heading_to === "ngo" ? "Picked up" : i.job_status === "assigned" ? "Not accepted yet" : "To pickup"}</span>}
                   </div>
                   <span className="muted small">
-                    {i.rider_name} · {i.heading_to === "point" ? `to ${i.point?.name}` : `pickup in ${i.pickup.area.slice(-1)[0] ?? ""}`}
+                    {i.rider_name} · {i.heading_to === "ngo" ? `to ${i.ngo?.name}` : `pickup in ${i.pickup.area.slice(-1)[0] ?? ""}`}
                   </span>
                   <span className="small" style={{ color: i.stalled ? "var(--urgent)" : "var(--muted)" }}>
                     {i.minutes_since_ping === null ? "No GPS yet" : i.minutes_since_ping === 0 ? "GPS just now" : `GPS ${i.minutes_since_ping} min ago`}

@@ -1,8 +1,8 @@
 # RAAZICID
 
 AI-guided donation collection and distribution for Pakistan. Donors give items through the mobile app,
-RAAZICID riders collect them and our team hands them out at distribution points in the areas that
-need them most. Need is found with a RAG over official reports (IPC, NDMA / PDMA via ReliefWeb,
+RAAZICID riders collect them and drop them at NGOs, charities and welfare trusts in the donor's city
+(found by AI web search), who give them to the people who need them most. Need is found with a RAG over official reports (IPC, NDMA / PDMA via ReliefWeb,
 GDACS, HDX) plus Claude web search, and seasonal rules.
 
 Final Year Project, Department of Software Engineering.
@@ -132,7 +132,7 @@ HDX_EMAIL=you@example.com           # HDX HAPI needs an email to identify the ap
 WEB_SCAN_EVERY_HOURS=0              # 0 = Claude news scan only when you press "Scan news now"
 ```
 While the backend runs it fetches GDACS every 30 minutes and HDX (IPC, food prices, poverty) once a day,
-then recomputes need levels. Admin web: **Disaster alerts** (check, confirm, open a relief camp, data sources)
+then recomputes need levels. Admin web: **Disaster alerts** (check, confirm, recommended donations, NGOs nearby, data sources)
 and **Needs by area**. Donor app: **Alerts** tab, the Home banner and "What is needed where".
 
 ### 7. Report library and need finder (Phase 6B)
@@ -147,6 +147,11 @@ Once ReliefWeb approves your appname, add `RELIEFWEB_APPNAME=...` to `backend/.e
 agencies (UNICEF, WFP, WHO, UNHCR, OCHA…) then arrive every 6 hours, and the need finder looks up ReliefWeb live.
 
 After pulling this version run `alembic upgrade head` once (adds the "read for needs" date to reports).
+
+**NGOs instead of distribution points (Oct 2026).** Run `alembic upgrade head` again: migration 0003 adds the NGO
+tables, turns "at point" and "handed out" donations into "delivered" and removes distribution points, relief camps,
+point requests and hand-outs. Then open **NGOs** in the admin web, choose a city and press **Search the web** (or add
+an NGO you know). When you accept a donation you pick the NGO; the rider drops it there and the job is done.
 The AI then reads every library report for unmet needs; they show up in Needs by area with the report's quote and page.
 
 UN data from HDX HAPI (no extra setup, it comes with the daily HDX fetch): OCHA 3W (who works where), people in
@@ -178,10 +183,10 @@ These figures are a few years old, so they are shown on their own and never chan
 
 - [x] Phase 1 — design (ERD, API contract, status flow), skeletons, data source check
 - [x] Phase 2 — accounts and authentication (sign-up, login, rider documents and approval)
-- [x] Phase 3 — donations and distribution points (donate flow, admin review, points and requests)
-- [x] Phase 4 — pickup, delivery, tracking (assign rider, proofs with GPS checks, hand-out, live map)
+- [x] Phase 3 — donations and NGOs (donate flow, admin review, NGOs found by web search or added by hand)
+- [x] Phase 4 — pickup, delivery to the NGO, tracking (assign rider, proofs with GPS checks, live map)
 - [x] Phase 5 — AI: photo classifier (PyTorch), rider score, urgency v2, Claude document check
-- [x] Phase 6A — needs by area, disaster alerts (GDACS, HDX, Claude web scan), relief camps
+- [x] Phase 6A — needs by area, disaster alerts (GDACS, HDX, AI web scan), recommended donations per disaster
 - [x] Phase 6B — report library, RAG need finder (hybrid search + Claude with citations), appeals, notifications
 - [ ] Phase 7 — seasonal suggestions
 - [ ] Phase 8 — analytics, fraud flags, ratings

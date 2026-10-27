@@ -115,7 +115,7 @@ export default function NeedsScreen() {
       ) : null}
 
       <Text style={{ color: colors.muted, fontSize: 12 }}>
-        Worked out from IPC food insecurity, food prices, poverty data, disaster alerts and what people ask for at our distribution points.
+        Worked out from IPC food insecurity, food prices, poverty data, disaster alerts, displacement and recent news and reports.
       </Text>
     </Screen>
   );

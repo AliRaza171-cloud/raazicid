@@ -60,7 +60,7 @@ picked the #1 rider, and average pickup time for #1 vs other choices. Unit tests
 ## 3. Food urgency
 
 Cooked +35 (dry +5); time since cooking up to +40; quantity up to +20; distance to the nearest
-point that can hand out cooked food the same day up to +12. Capped at 100. Cooked food older than 8 hours
+NGO that takes cooked food up to +12. Capped at 100. Cooked food older than 8 hours
 gets a warning. Scores are refreshed while the food is waiting, so the admin list stays in the right order.
 
 ## 4. Rider document check (Claude)

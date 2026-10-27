@@ -11,15 +11,15 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_current_user, require_roles
 from app.core.errors import api_error
 from app.db.session import get_db
-from app.models import Category, DistributionPoint, Donation, DonationImage, HandOut, Job, StatusChange, User
-from app.models.enums import DonationStatus, ImageKind, JobStatus, Role
+from app.models import Category, Donation, DonationImage, Job, StatusChange, User
+from app.models.enums import DonationStatus, ImageKind, Role
 from app.schemas.donations import DonationIn, DonationList, DonationOut
-from app.schemas.jobs import HandOutIn, TrackingOut
+from app.schemas.jobs import TrackingOut
 from app.services.donations import (
     ACTIVE, CANCELLABLE, DONE, change_status, check_location, current_job, donation_out, list_item,
-    nearest_food_point_km,
 )
 from app.services.jobs import tracking
+from app.services.ngos import nearest_food_ngo_km
 from app.services.urgency import food_urgency
 
 router = APIRouter(prefix="/donations", tags=["donations"])
@@ -38,7 +38,7 @@ def create_donation(body: DonationIn, user: User = Depends(donor_only), db: Sess
 
     now = datetime.now(timezone.utc)
     score, _ = food_urgency(is_food, body.food_type, body.prepared_at, body.quantity, now,
-                            nearest_food_point_km(db, body.pickup.lat, body.pickup.lng))
+                            nearest_food_ngo_km(db, body.pickup.lat, body.pickup.lng))
     d = Donation(
         donor_id=user.id, category_id=cat.id,
         ai_category_id=body.ai.category_id if body.ai else None,
@@ -114,30 +114,3 @@ def track(donation_id: uuid.UUID, user: User = Depends(get_current_user), db: Se
     """Where the rider is now. The donor app and admin refresh this every 15 s."""
     d = _get_visible(db, donation_id, user)
     return tracking(db, d, current_job(db, d))
-
-
-@router.post("/{donation_id}/hand-out", response_model=DonationOut)
-def hand_out(donation_id: uuid.UUID, body: HandOutIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Our team handed the items to families at the point: the last step. Admin, or the rider who delivered it."""
-    d = _get_visible(db, donation_id, user)
-    job = current_job(db, d)
-    if user.role == Role.rider:
-        if job is None or job.rider_id != user.id or job.status != JobStatus.delivered:
-            raise api_error(403, "forbidden", "Only the rider who delivered it or an admin can record the hand-out")
-    elif user.role != Role.admin:
-        raise api_error(403, "forbidden", "Only the rider who delivered it or an admin can record the hand-out")
-    if d.status != DonationStatus.at_point:
-        raise api_error(409, "bad_status", "Record the hand-out after the donation reaches the point")
-    if body.quantity > d.quantity:
-        raise api_error(422, "too_many", f"This donation has {d.quantity} item(s)")
-    db.add(HandOut(donation_id=d.id, point_id=d.point_id, handed_out_by=user.id, quantity=body.quantity,
-                   families_served=body.families_served, photo_url=body.photo_url,
-                   note=(body.note or "").strip() or None))
-    if body.photo_url:
-        db.add(DonationImage(donation_id=d.id, kind=ImageKind.distribution_proof, url=body.photo_url, uploaded_by=user.id))
-    fam = body.families_served
-    summary = f"{body.quantity} handed out" + (f" to {fam} famil{'y' if fam == 1 else 'ies'}." if fam else ".")
-    change_status(db, d, DonationStatus.handed_out, user, summary)
-    db.commit()
-    db.refresh(d)
-    return donation_out(db, d)

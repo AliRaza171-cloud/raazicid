@@ -1,4 +1,4 @@
-"""Shapes for rider jobs, proof photos, hand-outs and live tracking (Phase 4)."""
+"""Shapes for rider jobs, proof photos and live tracking (Phase 4)."""
 
 import uuid
 from datetime import datetime
@@ -86,18 +86,6 @@ class PingIn(_Coords):
     pass
 
 
-class HandOutIn(BaseModel):
-    quantity: int = Field(ge=1, le=10000)
-    families_served: Optional[int] = Field(default=None, ge=0, le=10000)
-    photo_url: Optional[str] = None
-    note: Optional[str] = Field(default=None, max_length=500)
-
-    @field_validator("photo_url")
-    @classmethod
-    def url_ok(cls, v: Optional[str]) -> Optional[str]:
-        return _https(v)
-
-
 class Place(BaseModel):
     name: Optional[str] = None
     address: str
@@ -106,6 +94,7 @@ class Place(BaseModel):
     area: list[str]
     contact_name: Optional[str] = None
     contact_phone: Optional[str] = None
+    approx: bool = False               # only the city centre is known: call the NGO for directions
 
 
 class JobOut(BaseModel):
@@ -131,11 +120,10 @@ class JobOut(BaseModel):
     pickup: Place
     pickup_from: Optional[datetime]
     pickup_to: Optional[datetime]
-    point: Optional[Place]
+    ngo: Optional[Place]                # where to drop it
     donor_name: str
     donor_phone: Optional[str]          # shown once the rider has accepted the job
-    trip_km: Optional[float]            # pickup -> point, straight line
-    can_hand_out: bool
+    trip_km: Optional[float]            # pickup -> NGO, straight line
 
 
 class JobList(BaseModel):
@@ -163,13 +151,13 @@ class TrackingOut(BaseModel):
     donation_status: str
     job_id: Optional[uuid.UUID]
     job_status: Optional[JobStatus]
-    heading_to: Optional[Literal["pickup", "point"]]
+    heading_to: Optional[Literal["pickup", "ngo"]]
     rider: Optional[TrackingRider]
     last: Optional[LatLng]
     path: list[LatLng]
     stalled: bool                      # no GPS for 10+ minutes during an active job
     pickup: Place
-    point: Optional[Place]
+    ngo: Optional[Place]
 
 
 class AdminTrackingItem(BaseModel):
@@ -180,9 +168,9 @@ class AdminTrackingItem(BaseModel):
     title: str
     rider_name: str
     rider_phone: str
-    heading_to: Literal["pickup", "point"]
+    heading_to: Literal["pickup", "ngo"]
     last: Optional[LatLng]
     minutes_since_ping: Optional[int]
     stalled: bool
     pickup: Place
-    point: Optional[Place]
+    ngo: Optional[Place]

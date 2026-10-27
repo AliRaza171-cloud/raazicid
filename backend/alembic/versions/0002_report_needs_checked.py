@@ -14,6 +14,9 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # A new database already has the column (0001 builds the tables from the current models)
+    if "needs_checked_at" in {c["name"] for c in sa.inspect(op.get_bind()).get_columns("reports")}:
+        return
     op.add_column("reports", sa.Column("needs_checked_at", sa.DateTime(timezone=True), nullable=True))
     op.create_index("ix_reports_needs_checked_at", "reports", ["needs_checked_at"])
 

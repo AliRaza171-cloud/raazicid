@@ -13,8 +13,8 @@ from app.main import app
 EXPECTED_TABLES = {
     "users", "rider_profiles", "rider_documents", "document_reviews", "refresh_tokens",
     "locations", "categories",
-    "donations", "donation_images", "status_changes", "hand_outs", "ratings",
-    "distribution_points", "point_categories", "jobs", "rider_pings", "point_requests",
+    "donations", "donation_images", "status_changes", "ratings",
+    "ngos", "ngo_categories", "jobs", "rider_pings",
     "sources", "reports", "report_chunks", "chunk_locations",
     "need_indicators", "need_levels", "seasonal_rules",
     "disaster_alerts", "alert_locations", "alert_reports", "alert_needs", "appeals",

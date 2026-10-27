@@ -76,9 +76,8 @@ erDiagram
     CATEGORIES ||--o{ DONATIONS : "category"
     DONATIONS ||--o{ DONATION_IMAGES : photos
     DONATIONS ||--o{ STATUS_CHANGES : history
-    DONATIONS ||--o{ HAND_OUTS : "handed out"
     DONATIONS ||--o{ RATINGS : rated
-    DISTRIBUTION_POINTS ||--o{ DONATIONS : "sent to"
+    NGOS ||--o{ DONATIONS : "delivered to"
     APPEALS ||--o{ DONATIONS : "answered"
 
     DONATIONS {
@@ -98,7 +97,7 @@ erDiagram
         float pickup_lat
         float pickup_lng
         string status
-        uuid point_id FK
+        uuid ngo_id FK
         uuid appeal_id FK
     }
     DONATION_IMAGES {
@@ -116,38 +115,32 @@ erDiagram
         string to_status
         uuid changed_by FK
     }
-    HAND_OUTS {
-        uuid id PK
-        uuid donation_id FK
-        uuid point_id FK
-        uuid handed_out_by FK "rider or admin"
-        int quantity
-        int families_served
-        text photo_url
-    }
 ```
 
 ## 3. Logistics
 
 ```mermaid
 erDiagram
-    LOCATIONS ||--o{ DISTRIBUTION_POINTS : "area of"
-    DISTRIBUTION_POINTS }o--o{ CATEGORIES : "accepts (point_categories)"
+    LOCATIONS ||--o{ NGOS : "city of"
+    NGOS }o--o{ CATEGORIES : "takes (ngo_categories)"
     DONATIONS ||--o{ JOBS : "rider jobs"
     USERS ||--o{ JOBS : "rider"
     JOBS ||--o{ RIDER_PINGS : "GPS every 15 s"
-    DISTRIBUTION_POINTS ||--o{ POINT_REQUESTS : "asks for"
 
-    DISTRIBUTION_POINTS {
+    NGOS {
         uuid id PK
         string name
-        string type "mosque | school | community_centre | relief_camp"
-        uuid location_id FK
+        uuid location_id FK "city or district"
+        text address
         float lat
         float lng
-        bool same_day_food
-        datetime closes_at "relief camps"
-        uuid alert_id FK
+        bool location_approx "only the city centre is known"
+        string phone
+        text website
+        bool takes_cooked_food
+        text source_url "web page it was found on"
+        string found_by "web_search | admin"
+        bool is_active
     }
     JOBS {
         uuid id PK
@@ -156,13 +149,6 @@ erDiagram
         string status "assigned | accepted | declined | picked_up | delivered | cancelled"
         float recommendation_score
         uuid replaces_job_id FK
-    }
-    POINT_REQUESTS {
-        uuid id PK
-        uuid point_id FK
-        int category_id FK
-        int quantity
-        string status "open | fulfilled"
     }
 ```
 

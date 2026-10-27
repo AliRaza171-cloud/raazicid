@@ -205,7 +205,7 @@ export default function NeedFinder() {
                 </table>
                 <div style={{ display: "flex", gap: 8, padding: "0 18px 14px" }}>
                   <Link className="btn ghost small" to="/needs">Open needs by area</Link>
-                  <Link className="btn ghost small" to="/points">Add a distribution point</Link>
+                  <Link className="btn ghost small" to="/ngos">Find NGOs there</Link>
                 </div>
               </section>
             )}

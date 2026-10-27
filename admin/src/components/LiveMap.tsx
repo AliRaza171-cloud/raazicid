@@ -7,17 +7,17 @@ export type MapMarker = {
   lat: number;
   lng: number;
   label: string;
-  kind: "pickup" | "point" | "rider" | "stalled";
+  kind: "pickup" | "ngo" | "rider" | "stalled";
   color?: string;
   size?: number;
-  square?: boolean;        // distribution points; places are round
+  square?: boolean;        // NGOs; places are round
   ring?: string;           // outline colour, e.g. a coverage gap
   selected?: boolean;
   onClick?: () => void;
 };
 export type MapLine = { id: string; points: { lat: number; lng: number }[] };
 
-const COLORS = { pickup: "#0F6B5C", point: "#2449A8", rider: "#D97706", stalled: "#A2361A" };
+const COLORS = { pickup: "#0F6B5C", ngo: "#2449A8", rider: "#D97706", stalled: "#A2361A" };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Leaflet = any;
@@ -144,7 +144,7 @@ export function MapLegend() {
       {item(COLORS.rider, "Rider on a job")}
       {item(COLORS.stalled, "Stalled (no GPS 10+ min)")}
       {item(COLORS.pickup, "Pickup")}
-      {item(COLORS.point, "Distribution point")}
+      {item(COLORS.ngo, "NGO")}
     </div>
   );
 }

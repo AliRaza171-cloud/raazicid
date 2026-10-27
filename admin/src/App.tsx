@@ -10,7 +10,7 @@ import Flags from "./pages/Flags";
 import Login from "./pages/Login";
 import NeedFinder from "./pages/NeedFinder";
 import NeedsMap from "./pages/NeedsMap";
-import Points from "./pages/Points";
+import Ngos from "./pages/Ngos";
 import Reports from "./pages/Reports";
 import Riders from "./pages/Riders";
 import Seasonal from "./pages/Seasonal";
@@ -37,7 +37,8 @@ export default function App() {
         <Route path="donations/:id" element={<DonationDetail />} />
         <Route path="tracking" element={<Tracking />} />
         <Route path="riders" element={<Riders />} />
-        <Route path="points" element={<Points />} />
+        <Route path="ngos" element={<Ngos />} />
+        <Route path="points" element={<Navigate to="/ngos" replace />} />
         <Route path="needs" element={<NeedsMap />} />
         <Route path="need-finder" element={<NeedFinder />} />
         <Route path="reports" element={<Reports />} />

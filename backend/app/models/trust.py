@@ -29,7 +29,7 @@ class FraudFlag(UUIDPk, Timestamps, Base):
 
     __tablename__ = "fraud_flags"
 
-    rule_code: Mapped[str] = mapped_column(String(40), index=True)   # e.g. far_from_point, same_photo, burst
+    rule_code: Mapped[str] = mapped_column(String(40), index=True)   # e.g. far_from_ngo, same_photo, burst
     severity: Mapped[Severity] = mapped_column(enum_col(Severity))
     entity_type: Mapped[str] = mapped_column(String(20))             # user | donation | job
     entity_id: Mapped[uuid.UUID] = mapped_column(index=True)

@@ -55,7 +55,7 @@ export default function HistoryScreen() {
               </View>
               <Text style={{ fontSize: 12, color: colors.muted }}>
                 {j.donation_ref} · {dateTime(j.delivered_at ?? j.assigned_at)}
-                {j.point ? ` · ${j.point.name}` : ""}
+                {j.ngo ? ` · ${j.ngo.name}` : ""}
               </Text>
               {j.decline_reason ? <Text style={{ fontSize: 13, color: colors.ink2 }}>{j.decline_reason}</Text> : null}
             </View>

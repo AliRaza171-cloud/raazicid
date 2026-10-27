@@ -12,7 +12,7 @@ const groups: { label: string; items: Item[] }[] = [
       { to: "/donations", label: "Donations" },
       { to: "/tracking", label: "Live tracking" },
       { to: "/riders", label: "Riders" },
-      { to: "/points", label: "Distribution points" },
+      { to: "/ngos", label: "NGOs" },
     ],
   },
   {

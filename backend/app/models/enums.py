@@ -54,8 +54,7 @@ class DonationStatus(str, Enum):
     rejected = "rejected"
     rider_assigned = "rider_assigned"
     picked_up = "picked_up"
-    at_point = "at_point"            # delivered to the distribution point
-    handed_out = "handed_out"        # our team distributed it to families
+    delivered = "delivered"          # our rider dropped it at the NGO (the last step: the NGO gives it out)
     cancelled = "cancelled"
 
 
@@ -63,15 +62,8 @@ class ImageKind(str, Enum):
     donor_photo = "donor_photo"
     pickup_proof = "pickup_proof"
     delivery_proof = "delivery_proof"
-    distribution_proof = "distribution_proof"
 
 
-class PointType(str, Enum):
-    mosque = "mosque"
-    school = "school"
-    community_centre = "community_centre"
-    relief_camp = "relief_camp"
-    other = "other"
 
 
 class JobStatus(str, Enum):
@@ -137,7 +129,3 @@ class Severity(str, Enum):
     high = "high"
 
 
-class RequestStatus(str, Enum):
-    open = "open"
-    fulfilled = "fulfilled"
-    cancelled = "cancelled"

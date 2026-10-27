@@ -1,4 +1,4 @@
-"""Phase 4 end-to-end: assign rider, accept, GPS, pickup and delivery proof, hand-out, decline, cancel.
+"""Phase 4 end-to-end: assign rider, accept, GPS, pickup proof, delivery to the NGO, decline, cancel.
 Skipped without TEST_DATABASE_URL."""
 
 import uuid
@@ -8,7 +8,8 @@ from sqlalchemy import select
 from app.models import FraudFlag, Notification, RiderProfile
 from app.models.enums import RiderStatus
 from tests.test_auth_api import API, auth, register
-from tests.test_donations_api import admin_headers, donation_body, make_point
+from app.models import Ngo
+from tests.test_donations_api import admin_headers, donation_body, make_ngo
 
 PHOTO = "https://res.cloudinary.com/demo/proof.jpg"
 
@@ -22,17 +23,17 @@ def approved_rider(client, db) -> tuple[dict, str]:
 
 
 def accepted_donation(client, db, admin_h) -> tuple[dict, dict, dict]:
-    point = make_point(client, admin_h, db, name=f"Hall {uuid.uuid4().hex[:4]}", where="Saddar", lat=24.86, lng=67.03)
+    ngo = make_ngo(client, admin_h, db, name=f"Trust {uuid.uuid4().hex[:4]}", where="Saddar", lat=24.86, lng=67.03)
     donor_h = auth(register(client).json()["access_token"])
     d = client.post(f"{API}/donations", headers=donor_h, json=donation_body(db)).json()
-    ok = client.post(f"{API}/admin/donations/{d['id']}/accept", headers=admin_h, json={"point_id": point["id"]})
+    ok = client.post(f"{API}/admin/donations/{d['id']}/accept", headers=admin_h, json={"ngo_id": ngo["id"]})
     assert ok.status_code == 200, ok.text
-    return d, donor_h, point
+    return d, donor_h, ngo
 
 
 def test_full_delivery_flow(client, db):
     admin_h = admin_headers(client, db)
-    d, donor_h, point = accepted_donation(client, db, admin_h)
+    d, donor_h, ngo = accepted_donation(client, db, admin_h)
     rider_h, rider_id = approved_rider(client, db)
     other_h, _ = approved_rider(client, db)
 
@@ -53,7 +54,7 @@ def test_full_delivery_flow(client, db):
     jobs = client.get(f"{API}/rider/jobs", headers=rider_h).json()
     assert jobs["total"] == 1
     job = jobs["items"][0]
-    assert job["status"] == "assigned" and job["donor_phone"] is None and job["point"]["name"] == point["name"]
+    assert job["status"] == "assigned" and job["donor_phone"] is None and job["ngo"]["name"] == ngo["name"]
     jid = job["id"]
 
     # Another rider cannot touch this job; nothing before accepting
@@ -76,26 +77,20 @@ def test_full_delivery_flow(client, db):
     flags = db.scalars(select(FraudFlag).where(FraudFlag.entity_id == uuid.UUID(jid))).all()
     assert [f.rule_code for f in flags] == ["far_from_pickup"]
 
-    # Delivery at the point: no flag
+    # Delivery at the NGO: the last step, no flag
+    t = client.get(f"{API}/donations/{d['id']}/tracking", headers=donor_h).json()
+    assert t["heading_to"] == "ngo" and t["ngo"]["name"] == ngo["name"]
     dl = client.post(f"{API}/rider/jobs/{jid}/deliver", headers=rider_h, json={"photo_url": PHOTO, "lat": 24.8601, "lng": 67.0301})
-    assert dl.status_code == 200 and dl.json()["status"] == "delivered" and dl.json()["can_hand_out"]
+    assert dl.status_code == 200 and dl.json()["status"] == "delivered" and dl.json()["donation_status"] == "delivered"
     assert client.post(f"{API}/rider/jobs/{jid}/ping", headers=rider_h, json={"lat": 24.86, "lng": 67.03}).status_code == 409
+    assert client.get(f"{API}/rider/jobs", headers=rider_h).json()["total"] == 0
 
-    # Still in "current" until the hand-out is recorded
-    assert client.get(f"{API}/rider/jobs", headers=rider_h).json()["total"] == 1
-
-    # Hand-out: donor cannot, too many items refused, rider who delivered can
-    assert client.post(f"{API}/donations/{d['id']}/hand-out", headers=donor_h, json={"quantity": 10}).status_code == 403
-    assert client.post(f"{API}/donations/{d['id']}/hand-out", headers=rider_h, json={"quantity": 11}).status_code == 422
-    ho = client.post(f"{API}/donations/{d['id']}/hand-out", headers=rider_h,
-                     json={"quantity": 10, "families_served": 8, "photo_url": PHOTO})
-    assert ho.status_code == 200, ho.text
-    out = ho.json()
-    assert out["status"] == "handed_out" and out["hand_out"]["families_served"] == 8
-    assert {p["kind"] for p in out["proofs"]} == {"pickup_proof", "delivery_proof", "distribution_proof"}
+    out = client.get(f"{API}/donations/{d['id']}", headers=donor_h).json()
+    assert out["status"] == "delivered" and out["ngo"]["name"] == ngo["name"]
+    assert {p["kind"] for p in out["proofs"]} == {"pickup_proof", "delivery_proof"}
     pickup_proof = next(p for p in out["proofs"] if p["kind"] == "pickup_proof")
     assert pickup_proof["distance_km"] > 1
-    assert [h["to_status"] for h in out["history"]][-4:] == ["rider_assigned", "picked_up", "at_point", "handed_out"]
+    assert [h["to_status"] for h in out["history"]][-3:] == ["rider_assigned", "picked_up", "delivered"]
 
     summary = client.get(f"{API}/rider/summary", headers=rider_h).json()
     assert summary["done_today"] == 1 and summary["active_jobs"] == 0
@@ -104,7 +99,27 @@ def test_full_delivery_flow(client, db):
     # Donor was told at each step
     donor_id = client.get(f"{API}/me", headers=donor_h).json()["id"]
     types = {n.type for n in db.scalars(select(Notification).where(Notification.user_id == uuid.UUID(donor_id)))}
-    assert {"donation_rider_assigned", "donation_picked_up", "donation_at_point", "donation_handed_out"} <= types
+    assert {"donation_rider_assigned", "donation_picked_up", "donation_delivered"} <= types
+
+
+def test_first_delivery_fixes_an_approximate_ngo_location(client, db):
+    admin_h = admin_headers(client, db)
+    d, donor_h, ngo = accepted_donation(client, db, admin_h)
+    row = db.get(Ngo, uuid.UUID(ngo["id"]))
+    row.location_approx = True   # found on the web with only the city centre
+    db.commit()
+    rider_h, rider_id = approved_rider(client, db)
+    client.post(f"{API}/admin/donations/{d['id']}/assign", headers=admin_h, json={"rider_id": rider_id})
+    jid = client.get(f"{API}/rider/jobs", headers=rider_h).json()["items"][0]["id"]
+    assert client.get(f"{API}/rider/jobs/{jid}", headers=rider_h).json()["ngo"]["approx"]
+    client.post(f"{API}/rider/jobs/{jid}/accept", headers=rider_h)
+    client.post(f"{API}/rider/jobs/{jid}/pickup", headers=rider_h, json={"photo_url": PHOTO, "lat": 24.855, "lng": 67.02})
+    far = client.post(f"{API}/rider/jobs/{jid}/deliver", headers=rider_h, json={"photo_url": PHOTO, "lat": 24.9, "lng": 67.1})
+    assert far.status_code == 200
+    db.expire_all()
+    row = db.get(Ngo, uuid.UUID(ngo["id"]))
+    assert not row.location_approx and (row.lat, row.lng) == (24.9, 67.1)
+    assert not db.scalars(select(FraudFlag).where(FraudFlag.entity_id == uuid.UUID(jid), FraudFlag.rule_code == "far_from_ngo")).all()
 
 
 def test_decline_and_cancel_job(client, db):

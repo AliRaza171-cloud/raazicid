@@ -8,7 +8,7 @@ from app.models import Location
 from app.models.enums import LocationLevel
 from app.services.geo import distance_km
 
-# How far a point may be from the centre of the place it is filed under before we say the coordinates look wrong
+# How far a pin may be from the centre of the place it is filed under before we say the coordinates look wrong
 NEAR_KM = {LocationLevel.city: 60, LocationLevel.region: 30, LocationLevel.area: 30}
 
 
@@ -79,7 +79,7 @@ def coords_problem(db: Session, location_id: uuid.UUID, lat: float, lng: float) 
         if d > NEAR_KM[c.level]:
             if near and near[0].id == c.id:
                 where = ""
-            filed = "" if c.id == place.id else f" (the point is filed under {place.name})"
+            filed = "" if c.id == place.id else f" (it is filed under {place.name})"
             return f"The coordinates are about {round(d)} km from {c.name}{filed}.{where}"
         return None
     # No coordinates for the place: at least check the province of the nearest city
