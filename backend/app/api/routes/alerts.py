@@ -20,7 +20,8 @@ from app.schemas.points import PointDetail
 from app.services.donations import point_out
 from app.services.geo import in_pakistan
 from app.services.locations import location_path
-from app.services.needs import recompute, suggest_alert_needs
+from app.services.needs import families, recompute, suggest_alert_needs
+from app.services.relief import recommend
 from app.services.sources.runner import run_source
 
 router = APIRouter(tags=["alerts"])
@@ -45,6 +46,16 @@ class AlertNeedOut(BaseModel):
     quantity_pledged: int
 
 
+class Recommendation(BaseModel):
+    category_id: int
+    name: str
+    when: Literal["now", "soon", "later"]
+    why: str
+    per_family: float
+    quantity: Optional[int]
+    listed: bool   # already in "what is needed"
+
+
 class AlertSource(BaseModel):
     title: str
     url: Optional[str]
@@ -66,6 +77,9 @@ class AlertOut(BaseModel):
     from_gdacs: bool
     places: list[AlertPlace]
     needs: list[AlertNeedOut]
+    recommended: list[Recommendation] = []   # what to donate for this disaster, by priority, with a reason
+    recommend_notes: list[str] = []          # season, time since the start, watch alerts
+    families: Optional[int] = None           # affected families used for the quantities
     sources: list[AlertSource]
     camps: list[dict]
 
@@ -102,9 +116,19 @@ class CampIn(BaseModel):
 # ---------- helpers ----------
 
 def alert_out(db: Session, a: DisasterAlert) -> AlertOut:
-    cats = {c.id: c.name for c in db.scalars(select(Category))}
+    all_cats = list(db.scalars(select(Category)))
+    cats = {c.id: c.name for c in all_cats}
+    by_slug = {c.slug: c for c in all_cats}
     camps = db.scalars(select(DistributionPoint).where(DistributionPoint.alert_id == a.id))
+    fam = families(a.reported_figures or {})
+    started = (a.started_at or a.created_at or datetime.now(timezone.utc)).date()
+    advice, notes = recommend(a.type, a.severity, datetime.now(timezone.utc).date(), started, fam)
+    listed = {n.category_id for n in a.needs}
+    recommended = [Recommendation(category_id=by_slug[x.slug].id, name=by_slug[x.slug].name, when=x.when, why=x.why,
+                                  per_family=x.per_family, quantity=x.quantity, listed=by_slug[x.slug].id in listed)
+                   for x in advice if x.slug in by_slug]
     return AlertOut(
+        recommended=recommended, recommend_notes=notes, families=fam,
         id=a.id, type=a.type, severity=a.severity, status=a.status, title=a.title, summary=a.summary,
         figures=a.reported_figures or {}, started_at=a.started_at, created_at=a.created_at, confirmed_at=a.confirmed_at,
         from_gdacs=bool(a.gdacs_event_id),

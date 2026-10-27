@@ -37,6 +37,10 @@ def test_alert_flow_and_needs_by_area(client, db):
     assert alert["places"][0]["path"][-1] == "Lyari"
     qty = {n["category_id"]: n["quantity_needed"] for n in alert["needs"]}
     assert qty[2] == 100 and qty[4] == 200 and 12 in qty          # 1 ration and 2 blankets per family
+    # Recommended donations for a flood: life-saving items first, each with a reason; recovery items advised for later
+    rec = {x["name"]: x for x in alert["recommended"]}
+    assert alert["recommended"][0]["when"] == "now" and rec["Hygiene items"]["when"] == "now" and rec["Hygiene items"]["listed"]
+    assert rec["School supplies"]["when"] == "later" and not rec["School supplies"]["listed"] and alert["families"] == 100
 
     # Donors see it
     assert any(a["id"] == alert["id"] for a in client.get(f"{API}/alerts", headers=donor_h).json())

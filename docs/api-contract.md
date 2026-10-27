@@ -322,6 +322,24 @@ left every 2 hours. Long reports are trimmed to the ~40,000 characters that talk
 // 201: the new distribution point (type relief_camp, same-day food, categories = the alert's needs)
 ```
 
+**Recommended donations.** Every alert has `recommended`: our categories that help with that type of disaster, in
+order, each with `when` (`now` = first days, life-saving; `soon` = next weeks; `later` = recovery), a plain `why`,
+`per_family` and `quantity` (affected families × per family, 6 people per family), and `listed` (already in "what is
+needed"). `recommend_notes` explains adjustments: winter (Nov–Feb) moves blankets and winter support to `now`; three
+weeks after the start, ready food gives way to rations and recovery items move up; a `watch` alert means "get ready".
+"What is needed" is filled with the `now` and `soon` items; on the needs map an alert raises `now` items fully and
+`soon` items ×0.8 (rules in `services/relief.py`).
+
+| Disaster | Send now | Send soon | Later (recovery) |
+|---|---|---|---|
+| Flood | Emergency relief, food, hygiene, rations | Blankets, clothes, baby items | Household, school supplies, books |
+| Earthquake | Emergency relief, blankets, food, mobility aids | Rations, hygiene, winter support, clothes, household, baby | School supplies, books |
+| Cyclone | Emergency relief, food, hygiene, rations | Blankets, clothes, household, baby | School supplies |
+| Drought | Rations, hygiene, baby items | Food, household (water containers) | Clothes, school supplies |
+| Heatwave | Hygiene (water, ORS), baby items | Food, household (coolers), emergency relief (shade) | |
+| Cold wave | Blankets, winter support, clothes | Baby items, food | Rations |
+| Heavy rain | Emergency relief, hygiene | Blankets, food, household | Clothes |
+
 **Where alerts come from.** GDACS every 30 minutes (Pakistan events only, placed by name or nearest city) and the
 Claude web scan (NDMA, PDMA, PMD, ReliefWeb, Dawn, Express Tribune, The News, Geo, ARY, APP; last 72 hours).
 Both create *unconfirmed* alerts with their source links; donors see an alert only after an admin confirms it.

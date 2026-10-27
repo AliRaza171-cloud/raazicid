@@ -39,34 +39,15 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models import (AlertNeed, Category, DisasterAlert, DistributionPoint, Location, NeedIndicator, NeedLevel, PointRequest,
                         Report)
-from app.models.enums import AlertSeverity, AlertStatus, AlertType, ReportStatus, RequestStatus
+from app.models.enums import AlertSeverity, AlertStatus, ReportStatus, RequestStatus
 from app.services.locations import descendant_ids
+from app.services.relief import alert_slugs, recommend
 from app.services.sources.ai_needs import shows_gap
 from app.services.sources.hapi_un import category_sectors, sector_categories
 
 LEVEL_NAMES = ["none", "some", "high", "urgent"]
 
-ALERT_CATEGORIES: dict[AlertType, list[str]] = {
-    AlertType.flood: ["emergency_relief", "grocery_ration", "hygiene", "blankets", "clothes", "food"],
-    AlertType.earthquake: ["emergency_relief", "blankets", "winter_support", "household", "grocery_ration"],
-    AlertType.cyclone: ["emergency_relief", "grocery_ration", "hygiene", "household"],
-    AlertType.drought: ["grocery_ration", "food", "hygiene"],
-    AlertType.heatwave: ["hygiene", "food"],
-    AlertType.cold_wave: ["blankets", "winter_support", "clothes"],
-    AlertType.heavy_rain: ["emergency_relief", "hygiene", "household", "blankets"],
-    AlertType.other: ["emergency_relief"],
-}
-# Items per affected family, to suggest "what is needed" from reported figures (the admin can edit)
-PER_FAMILY: dict[AlertType, dict[str, float]] = {
-    AlertType.flood: {"grocery_ration": 1, "hygiene": 1, "blankets": 2, "emergency_relief": 0.5, "clothes": 1},
-    AlertType.earthquake: {"emergency_relief": 1, "blankets": 3, "grocery_ration": 1, "household": 1},
-    AlertType.cyclone: {"grocery_ration": 1, "hygiene": 1, "emergency_relief": 0.5},
-    AlertType.drought: {"grocery_ration": 1, "hygiene": 1},
-    AlertType.heatwave: {"hygiene": 1},
-    AlertType.cold_wave: {"blankets": 2, "winter_support": 1},
-    AlertType.heavy_rain: {"hygiene": 1, "blankets": 1, "household": 0.5},
-    AlertType.other: {"emergency_relief": 1},
-}
+# What each disaster type needs, when, and how many per family: services/relief.py
 PEOPLE_PER_FAMILY = 6
 ALERT_SCORE = {AlertSeverity.severe: 90, AlertSeverity.moderate: 65, AlertSeverity.watch: 40}
 
@@ -203,12 +184,13 @@ def suggest_alert_needs(db: Session, alert: DisasterAlert) -> None:
     ids = _slug_ids(db)
     fam = families(alert.reported_figures or {})
     have = {n.category_id: n for n in alert.needs}
-    for slug in ALERT_CATEGORIES.get(alert.type, []):
-        cid = ids.get(slug)
-        if cid is None:
-            continue
-        per = PER_FAMILY.get(alert.type, {}).get(slug)
-        qty = round(fam * per) if (fam and per) else None
+    started = (alert.started_at or alert.created_at or datetime.now(timezone.utc)).date()
+    advice, _ = recommend(alert.type, alert.severity, datetime.now(timezone.utc).date(), started, fam)
+    for a in advice:
+        cid = ids.get(a.slug)
+        if cid is None or a.when == "later":
+            continue   # recovery items are shown as advice, not listed as needed yet
+        qty = a.quantity
         if cid not in have:
             alert.needs.append(AlertNeed(category_id=cid, quantity_needed=qty))
         elif have[cid].quantity_needed is None and qty:
@@ -335,8 +317,9 @@ def recompute(db: Session) -> int:
         r = {"why": f"{a.title}{'' if confirmed else ' (not confirmed yet)'}", "source": "Disaster alert",
              "date": (a.started_at or a.created_at).strftime("%d %b %Y"), "alert_id": str(a.id)}
         for loc in a.locations:
-            for slug in ALERT_CATEGORIES.get(a.type, []):
-                add(loc.id, slug, score_alert(a.severity, confirmed), r)
+            started = (a.started_at or a.created_at).date()
+            for slug, weight in alert_slugs(a.type, datetime.now(timezone.utc).date(), started).items():
+                add(loc.id, slug, round(score_alert(a.severity, confirmed) * weight), r)
 
     by_id = {c.id: c.slug for c in db.scalars(select(Category))}
     reqs: dict[tuple, list] = defaultdict(lambda: [0, 0, None])

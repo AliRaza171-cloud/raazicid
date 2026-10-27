@@ -204,6 +204,8 @@ function AlertPanel({ id, cats, onClose, onChanged }: { id: string; cats: Catego
         )}
       </div>
 
+      <Recommended alert={a} editable={open} onSaved={(x) => { setA(x); onChanged("Added to what is needed"); }} />
+
       <NeedsTable alert={a} cats={cats} editable={open} onSaved={(x) => { setA(x); onChanged("Saved what is needed"); }} />
 
       {a.status === "confirmed" && <Appeals alert={a} cats={cats} onSent={onChanged} />}
@@ -272,6 +274,77 @@ function Appeals({ alert, cats, onSent }: { alert: Alert; cats: Category[]; onSe
           onCancel={() => setWriting(false)}
           onSent={(ap) => { setWriting(false); load(); onSent(`Appeal sent to ${ap.reached} donors in ${ap.provinces.join(", ")}`); }} />
       )}
+    </section>
+  );
+}
+
+const WHEN = {
+  now: { title: "Send now", sub: "first days: saves lives", style: { background: "var(--urgent-bg)", color: "var(--urgent)" } },
+  soon: { title: "Send soon", sub: "next few weeks", style: { background: "var(--warn-bg)", color: "var(--warn)" } },
+  later: { title: "Later, for recovery", sub: "when families go home", style: { background: "#eef0ec", color: "#46504b" } },
+} as const;
+
+function Recommended({ alert, editable, onSaved }: { alert: Alert; editable: boolean; onSaved: (a: Alert) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const recs = alert.recommended ?? [];
+  if (recs.length === 0) return null;
+  const type = alert.type === "other" ? "disaster" : ALERT_TYPES[alert.type]?.toLowerCase() ?? "disaster";
+
+  const add = async (ids: number[]) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const current = alert.needs.map((n) => ({ category_id: n.category_id, quantity_needed: n.quantity_needed }));
+      const extra = recs.filter((r) => ids.includes(r.category_id) && !r.listed).map((r) => ({ category_id: r.category_id, quantity_needed: r.quantity }));
+      onSaved(await api<Alert>(`/admin/alerts/${alert.id}/needs`, { method: "PUT", body: JSON.stringify([...current, ...extra]) }));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const missing = recs.filter((r) => !r.listed && r.when !== "later").map((r) => r.category_id);
+  return (
+    <section style={{ borderTop: "1px solid var(--line)", paddingTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div style={{ marginRight: "auto" }}>
+          <h3 style={{ margin: 0, fontSize: 15 }}>Recommended donations for this {type}</h3>
+          <p className="muted small" style={{ margin: "2px 0 0" }}>
+            From our 12 categories, in the order people need them.
+            {alert.families ? ` Amounts are for about ${alert.families.toLocaleString()} affected families.` : " Add the number of affected families to get amounts."}
+          </p>
+        </div>
+        {editable && missing.length > 0 && (
+          <button className="btn small" disabled={busy} onClick={() => add(missing)}>Add the {missing.length} missing to "What is needed"</button>
+        )}
+      </div>
+      {(alert.recommend_notes ?? []).map((n) => <div key={n} className="flash" style={{ background: "var(--info-bg)", color: "var(--info)" }}>{n}</div>)}
+      {(["now", "soon", "later"] as const).map((when) => {
+        const group = recs.filter((r) => r.when === when);
+        if (group.length === 0) return null;
+        return (
+          <div key={when} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+              <span className="chip" style={WHEN[when].style}>{WHEN[when].title}</span>
+              <span className="muted small">{WHEN[when].sub}</span>
+            </div>
+            {group.map((r) => (
+              <div key={r.category_id} style={{ display: "flex", gap: 10, alignItems: "flex-start", border: "1px solid var(--line)", borderRadius: 10, padding: "8px 10px" }}>
+                <div style={{ flex: 1 }}>
+                  <strong>{r.name}</strong>
+                  {r.quantity ? <span className="muted small"> · about {r.quantity.toLocaleString()} ({r.per_family} per family)</span> : null}
+                  <div className="small" style={{ color: "var(--ink-2)" }}>{r.why}</div>
+                </div>
+                {r.listed ? <span className="chip ok">Listed</span>
+                  : editable ? <button className="btn ghost small" disabled={busy} onClick={() => add([r.category_id])}>Add</button> : null}
+              </div>
+            ))}
+          </div>
+        );
+      })}
+      {error && <div className="flash bad" role="alert">{error}</div>}
     </section>
   );
 }

@@ -424,6 +424,9 @@ export interface Alert {
   from_gdacs: boolean;
   places: { id: string; name: string; path: string[]; lat: number | null; lng: number | null }[];
   needs: { category_id: number; name: string; quantity_needed: number | null; quantity_pledged: number }[];
+  recommended?: { category_id: number; name: string; when: "now" | "soon" | "later"; why: string; per_family: number; quantity: number | null; listed: boolean }[];
+  recommend_notes?: string[];
+  families?: number | null;
   sources: { title: string; url: string | null; publisher: string | null; published_at: string | null }[];
   camps: { id: string; name: string; is_active: boolean }[];
 }
