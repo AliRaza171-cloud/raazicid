@@ -333,7 +333,7 @@ def recompute(db: Session) -> int:
     return count
 
 
-def merged_reasons(levels: list[Any], limit: int = 5) -> list[dict]:
+def merged_reasons(levels: list[Any], limit: int = 12) -> list[dict]:
     """Reasons for a larger place: all reasons of the place with the highest need, then the main reason of the next
     places (an earthquake in Khuzdar must not hide behind rain in Killa Saifullah). Pure, unit-tested."""
     if not levels:

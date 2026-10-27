@@ -312,7 +312,7 @@ export default function NeedsMap() {
 
           <aside className="card" style={{ flex: "1 1 300px", display: "flex", flexDirection: "column", gap: 12 }} aria-label="Details">
             {picked ? (
-              <Reasons picked={picked} onFind={(id) => fillGaps(id, id, picked.need.category_id)} finding={filling !== null} />
+              <Reasons picked={picked} />
             ) : row ? (
               <PlacePanel dep={dep?.rows.find((d) => d.id === row.id)?.values ?? null} depLabels={dep?.measures ?? []} row={row} categoryId={categoryId} levelOf={levelOf} nearest={nearestFor(row, categoryId ?? row.needs[0]?.category_id ?? null)}
                 gap={gaps.find((g) => g.row.id === row.id) ?? null}
@@ -324,6 +324,9 @@ export default function NeedsMap() {
             )}
           </aside>
         </div>
+
+        {picked && <NeedDetail picked={picked} onClose={() => setPicked(null)} finding={filling !== null}
+          onFind={(id) => fillGaps(id, id, picked.need.category_id)} />}
 
         <DeprivationCard here={here.name} dep={dep} reload={loadDep}
           onDetails={(id) => { setPicked(null); setFocusPoint(null); setFocusRow(id); }} />
@@ -445,71 +448,16 @@ function ReasonCard({ r, place, main }: { r: NeedReason; place: string; main: bo
   );
 }
 
-type NeedNgo = {
-  id: string; name: string; address: string; phone: string | null; city: string; distance_km: number | null;
-  reachable: boolean; active_here: boolean; works_text: string | null; takes_listed: boolean; checked: boolean;
-  location_approx: boolean; lat: number; lng: number; found_by: string;
-};
-
-/** "Where to drop it": NGOs that take this item for this place, from /admin/ngos/for-need. */
-function DropAt({ picked, onFind, finding }: { picked: Picked; onFind: (placeId: string) => void; finding: boolean }) {
-  const [ngos, setNgos] = useState<NeedNgo[] | null>(null);
-  useEffect(() => {
-    setNgos(null);
-    if (!picked.placeId) return;
-    api<NeedNgo[]>(`/admin/ngos/for-need?location_id=${picked.placeId}&category_id=${picked.need.category_id}`)
-      .then(setNgos).catch(() => setNgos([]));
-  }, [picked.placeId, picked.need.category_id, finding]);
-  if (!picked.placeId) return null;
-  const item = picked.need.name.toLowerCase();
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <div className="kpi-label">NGOs that take {item} here</div>
-      {ngos === null ? <span className="muted small">Loading…</span> : ngos.length === 0 ? (
-        <div className="flash" style={{ background: "var(--warn-bg)", color: "var(--warn)" }}>
-          We know no NGO in or near {picked.place} that takes {item}.
-          <div style={{ marginTop: 6 }}>
-            <button className="btn small" disabled={finding} onClick={() => onFind(picked.placeId as string)}>{finding ? "Finding NGOs…" : `Find NGOs in ${picked.place}`}</button>
-          </div>
-        </div>
-      ) : ngos.map((n) => (
-        <div key={n.id} style={{ border: "1px solid var(--line)", borderRadius: 12, padding: "8px 10px", borderLeft: `3px solid ${n.active_here ? "var(--urgent)" : "var(--line)"}` }}>
-          <div style={{ display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap" }}>
-            <strong>{n.name}</strong>
-            {n.checked ? <span className="chip ok" style={{ height: 20, fontSize: 11 }}>✓ Checked</span>
-              : <span className="chip" style={{ height: 20, fontSize: 11, background: "var(--warn-bg)", color: "var(--warn)" }}>Call first</span>}
-            {!n.takes_listed && <span className="chip wait" style={{ height: 20, fontSize: 11 }} title="No item list yet: ask them">Items not confirmed</span>}
-          </div>
-          <div className="small" style={{ color: "var(--ink-2)" }}>
-            {n.location_approx ? `${n.city}: office address not known yet` : `${n.address}${n.distance_km !== null ? ` · ${n.distance_km} km` : ""}`}
-            {n.phone ? ` · ${n.phone}` : ""}
-          </div>
-          {n.active_here && <div className="small" style={{ color: "var(--urgent)", fontWeight: 600 }}>{n.works_text ?? "Works here (OCHA 3W)"}</div>}
-          {!n.reachable && <div className="muted small">Works here, but its office is in {n.city}: ask where to drop.</div>}
-          {!n.location_approx && <a className="small" href={`https://www.google.com/maps/dir/?api=1&destination=${n.lat},${n.lng}`} target="_blank" rel="noreferrer">Directions in Google Maps</a>}
-        </div>
-      ))}
-      {ngos && ngos.length > 0 && <Link className="small" to="/ngos">All NGOs</Link>}
-    </div>
-  );
-}
-
-function Reasons({ picked, onFind, finding }: { picked: Picked; onFind: (placeId: string) => void; finding: boolean }) {
-  const [first, ...rest] = picked.need.reasons;
+function Reasons({ picked }: { picked: Picked }) {
+  const [first] = picked.need.reasons;
   const lv = picked.need.level;
+  const count = picked.need.reasons.length;
   return (
     <>
       <div>
         <span className={`chip lv${lv}`}>{LEVELS[lv].label} need</span>
         <h2 style={{ margin: "8px 0 2px", fontSize: 18 }}>{picked.place} needs {picked.need.name.toLowerCase()}</h2>
         <div className="small" style={{ color: "var(--ink-2)" }}>{LEVEL_MEANING[lv]}</div>
-        {(picked.need.place_count ?? 0) > 1 && picked.need.places && (
-          <div className="small" style={{ marginTop: 6 }}>
-            <strong>Found in {picked.need.place_count} places:</strong>{" "}
-            {picked.need.places.map((x) => `${x.name} (${LEVELS[x.level].label.toLowerCase()})`).join(", ")}
-            {(picked.need.place_count ?? 0) > picked.need.places.length ? "…" : ""}
-          </div>
-        )}
       </div>
       {first && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -517,24 +465,161 @@ function Reasons({ picked, onFind, finding }: { picked: Picked; onFind: (placeId
           <ReasonCard r={first} place={picked.place} main />
         </div>
       )}
-      {rest.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div className="kpi-label">{rest.length === 1 ? "Another reason" : `${rest.length} more reasons`}</div>
-          {rest.map((r, i) => <ReasonCard key={i} r={r} place={picked.place} main={false} />)}
+      <button className="btn ghost small" onClick={() => document.getElementById("need-detail")?.scrollIntoView({ behavior: "smooth" })}>
+        See all {count} reason{count === 1 ? "" : "s"} and the NGOs to contact ↓
+      </button>
+    </>
+  );
+}
+
+type NeedNgo = {
+  id: string; name: string; address: string; phone: string | null; website: string | null; about: string | null;
+  city: string; distance_km: number | null; reachable: boolean; active_here: boolean; works_text: string | null;
+  takes_listed: boolean; takes: string[]; checked: boolean; phone_confirmed: boolean; ban_checked: boolean;
+  registration: string | null; location_approx: boolean; lat: number; lng: number; found_by: string;
+};
+
+const FOUND_BY: Record<string, string> = { web_search: "Web search", openstreetmap: "OpenStreetMap", ocha_3w: "OCHA 3W", admin: "Added by admin" };
+
+/** Full-width detail for a picked need: why (one row per reason) and the NGOs to drop the item at, with contacts. */
+function NeedDetail({ picked, onFind, finding, onClose }: { picked: Picked; onFind: (placeId: string) => void; finding: boolean; onClose: () => void }) {
+  const [ngos, setNgos] = useState<NeedNgo[] | null>(null);
+  useEffect(() => {
+    setNgos(null);
+    if (!picked.placeId) { setNgos([]); return; }
+    api<NeedNgo[]>(`/admin/ngos/for-need?location_id=${picked.placeId}&category_id=${picked.need.category_id}`)
+      .then(setNgos).catch(() => setNgos([]));
+  }, [picked.placeId, picked.need.category_id, finding]);
+  const need = picked.need;
+  const item = need.name.toLowerCase();
+  const fresh = (r: NeedReason) => FRESH[r.fresh ?? (r.old ? "old" : "recent")];
+  const cell = { padding: "8px 10px", verticalAlign: "top" as const };
+
+  return (
+    <section className="card" id="need-detail" style={{ padding: 0 }}>
+      <div style={{ padding: "16px 18px 6px", display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div style={{ marginRight: "auto" }}>
+          <h2 style={{ margin: 0, fontSize: 17 }}>
+            {picked.place} needs {item} <span className={`chip lv${need.level}`} style={{ marginLeft: 6 }}>{LEVELS[need.level].label}</span>
+          </h2>
+          <p className="muted small" style={{ margin: "2px 0 0" }}>
+            {LEVEL_MEANING[need.level]}
+            {(need.place_count ?? 0) > 1 && need.places ? ` Found in ${need.place_count} places: ${need.places.map((x) => `${x.name} (${LEVELS[x.level].label.toLowerCase()})`).join(", ")}${(need.place_count ?? 0) > need.places.length ? "…" : ""}.` : ""}
+          </p>
+        </div>
+        <button className="btn ghost small" onClick={onClose}>Close</button>
+      </div>
+
+      <h3 style={{ margin: 0, padding: "8px 18px 4px", fontSize: 14 }}>Why ({need.reasons.length} reason{need.reasons.length === 1 ? "" : "s"})</h3>
+      <div style={{ overflowX: "auto" }}>
+        <table className="table">
+          <thead>
+            <tr><th>Place</th><th>What we found</th><th>When</th><th>Age</th><th>Weight</th><th>Source</th></tr>
+          </thead>
+          <tbody>
+            {need.reasons.map((r, i) => (
+              <tr key={i} style={{ opacity: r.old ? 0.8 : 1 }}>
+                <td style={cell}><strong>{r.place ?? picked.place}</strong></td>
+                <td style={{ ...cell, minWidth: 260 }}>
+                  {r.why}
+                  {r.reached === "none" && <div><span className="chip bad" style={{ height: 20, fontSize: 11, marginTop: 4 }}>Nobody has helped them yet</span></div>}
+                  {r.quote && <div className="small" style={{ fontStyle: "italic", color: "var(--ink-2)", marginTop: 4 }}>“{r.quote}”</div>}
+                </td>
+                <td style={{ ...cell, whiteSpace: "nowrap" }}>{r.date ?? "Now"}</td>
+                <td style={cell}><span className={`chip ${fresh(r).cls}`} title={fresh(r).tip}
+                  style={fresh(r).cls ? { height: 20, fontSize: 11 } : { height: 20, fontSize: 11, background: "var(--warn-bg)", color: "var(--warn)" }}>{fresh(r).label}</span></td>
+                <td style={{ ...cell, whiteSpace: "nowrap" }} title={`${r.points} points`}>{r.strength ? r.strength[0].toUpperCase() + r.strength.slice(1) : r.points}</td>
+                <td style={{ ...cell, minWidth: 160 }} className="small">
+                  {r.source}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {r.alert_id && <Link to={`/disasters?id=${r.alert_id}`}>Alert</Link>}
+                    {r.url && <a href={r.url} target="_blank" rel="noreferrer">Source</a>}
+                    {r.report_id && <Link to={`/reports?id=${r.report_id}`}>Report</Link>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ padding: "14px 18px 4px", display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+        <h3 style={{ margin: 0, fontSize: 14, marginRight: "auto" }}>NGOs that take {item} {picked.placeId ? `in or near ${picked.place}` : ""}</h3>
+        {picked.placeId && (
+          <button className="btn ghost small" disabled={finding} onClick={() => onFind(picked.placeId as string)}>
+            {finding ? "Finding NGOs…" : `Find more NGOs in ${picked.place}`}
+          </button>
+        )}
+      </div>
+      {!picked.placeId ? (
+        <p className="muted" style={{ padding: "4px 18px 16px", margin: 0 }}>Choose a province or a district to see NGOs there.</p>
+      ) : ngos === null ? (
+        <p className="muted" style={{ padding: "4px 18px 16px", margin: 0 }}>Loading NGOs…</p>
+      ) : ngos.length === 0 ? (
+        <p className="muted" style={{ padding: "4px 18px 16px", margin: 0 }}>
+          We know no NGO in or near {picked.place} that takes {item}. Press <strong>Find more NGOs</strong>, or add one you know on the <Link to="/ngos">NGOs page</Link>.
+        </p>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table className="table">
+            <thead>
+              <tr><th>NGO</th><th>Office</th><th>Contact</th><th>Takes</th><th>Checks</th><th /></tr>
+            </thead>
+            <tbody>
+              {ngos.map((n) => (
+                <tr key={n.id} style={n.active_here ? { boxShadow: "inset 3px 0 0 var(--urgent)" } : undefined}>
+                  <td style={{ ...cell, minWidth: 180 }}>
+                    <strong>{n.name}</strong>
+                    {n.about && <div className="muted small">{n.about}</div>}
+                    {n.active_here && <div className="small" style={{ color: "var(--urgent)", fontWeight: 600 }}>{n.works_text ?? "Works here (OCHA 3W)"}</div>}
+                    <div className="muted small">{FOUND_BY[n.found_by] ?? n.found_by}</div>
+                  </td>
+                  <td style={{ ...cell, minWidth: 170 }}>
+                    {n.location_approx ? <span style={{ color: "var(--warn)" }}>{n.city}: address not known yet</span> : n.address}
+                    <div className="muted small">{n.city}{n.distance_km !== null ? ` · ${n.distance_km} km` : ""}</div>
+                    {!n.reachable && <div className="muted small">Office outside {picked.place}: ask where to drop.</div>}
+                  </td>
+                  <td style={{ ...cell, whiteSpace: "nowrap" }}>
+                    {n.phone ? <a href={`tel:${n.phone.replace(/[^\d+]/g, "")}`}>{n.phone}</a> : <span className="muted">No phone yet</span>}
+                    {n.website && <div><a className="small" href={n.website} target="_blank" rel="noreferrer">Website</a></div>}
+                  </td>
+                  <td style={{ ...cell, minWidth: 140 }} className="small">
+                    {n.takes_listed ? n.takes.join(", ") : <span className="muted">Not confirmed (ask them)</span>}
+                  </td>
+                  <td style={cell}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-start" }}>
+                      <span className={`chip ${n.phone_confirmed ? "ok" : ""}`} style={n.phone_confirmed ? { height: 20, fontSize: 11 } : { height: 20, fontSize: 11, background: "var(--warn-bg)", color: "var(--warn)" }}>
+                        {n.phone_confirmed ? "✓ Called" : "Not called"}
+                      </span>
+                      <span className={`chip ${n.ban_checked ? "ok" : ""}`} style={n.ban_checked ? { height: 20, fontSize: 11 } : { height: 20, fontSize: 11, background: "var(--warn-bg)", color: "var(--warn)" }}>
+                        {n.ban_checked ? "✓ Not banned" : "Ban list not checked"}
+                      </span>
+                      {n.registration && <span className="chip ok" style={{ height: 20, fontSize: 11 }}>{n.registration}</span>}
+                    </div>
+                  </td>
+                  <td style={{ ...cell, whiteSpace: "nowrap" }}>
+                    {!n.location_approx && <a className="btn ghost small" href={`https://www.google.com/maps/dir/?api=1&destination=${n.lat},${n.lng}`} target="_blank" rel="noreferrer">Directions</a>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="muted small" style={{ padding: "6px 18px 14px", margin: 0 }}>
+            Red edge: works on this need here (OCHA 3W). Call an NGO before the first delivery and tick its checks on the <Link to="/ngos">NGOs page</Link>.
+          </p>
         </div>
       )}
-      <DropAt picked={picked} onFind={onFind} finding={finding} />
-      <details className="small" style={{ color: "var(--muted)" }}>
+      <details className="small" style={{ color: "var(--muted)", padding: "0 18px 14px" }}>
         <summary style={{ cursor: "pointer" }}>How do we decide the level?</summary>
         <ul style={{ margin: "6px 0 0", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 3 }}>
           <li>Each reason gets points for how serious it is.</li>
           <li>The strongest reason counts in full. Every other strong reason adds 5 points.</li>
-          <li>80 or more is urgent, 55 to 79 is high, 30 to 54 is some. This one has {picked.need.score}.</li>
+          <li>80 or more is urgent, 55 to 79 is high, 30 to 54 is some. This one has {need.score}.</li>
           <li>Information over a year old counts less. Over 2 years old is not used.</li>
           <li>Urgent needs a very serious reason (a severe disaster, or a food crisis for 30% of people or more), or several reasons together.</li>
         </ul>
       </details>
-    </>
+    </section>
   );
 }
 

@@ -147,7 +147,7 @@ def nearest_food_ngo_km(db: Session, lat: float, lng: float) -> Optional[float]:
     return best
 
 
-def ngos_for_need(db: Session, location_id: uuid.UUID, category_id: int, limit: int = 8) -> list[dict]:
+def ngos_for_need(db: Session, location_id: uuid.UUID, category_id: int, limit: int = 15) -> list[dict]:
     """NGOs to drop this item at for this place: offices in the place or within 30 km that take the item, and NGOs
     OCHA 3W says work there. Order: reachable offices first, then working there (3W), then those that list the item
     (not just "everything"), then checked ones, then nearest."""
@@ -170,7 +170,10 @@ def ngos_for_need(db: Session, location_id: uuid.UUID, category_id: int, limit: 
         reachable = n.location_id in inside or (dist is not None and dist <= 30) or (n.location_approx and n.location_id in here)
         if not (reachable or active):
             continue
-        out.append({"id": str(n.id), "name": n.name, "address": n.address, "phone": n.phone,
+        out.append({"website": n.website, "about": n.about, "registration": n.registration,
+                    "takes": [c.name for c in sorted(n.categories, key=lambda c: c.id)],
+                    "phone_confirmed": n.phone_confirmed_at is not None, "ban_checked": n.ban_checked_at is not None,
+                    "id": str(n.id), "name": n.name, "address": n.address, "phone": n.phone,
                     "city": location_path(db, n.location_id)[-1], "distance_km": dist, "reachable": reachable,
                     "active_here": active, "works_text": works.text(), "takes_listed": bool(listed),
                     "checked": n.phone_confirmed_at is not None and n.ban_checked_at is not None,
