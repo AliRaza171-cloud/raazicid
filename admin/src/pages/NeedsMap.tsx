@@ -423,6 +423,13 @@ function Reasons({ picked }: { picked: Picked }) {
         <span className={`chip lv${lv}`}>{LEVELS[lv].label} need</span>
         <h2 style={{ margin: "8px 0 2px", fontSize: 18 }}>{picked.place} needs {picked.need.name.toLowerCase()}</h2>
         <div className="small" style={{ color: "var(--ink-2)" }}>{LEVEL_MEANING[lv]}</div>
+        {(picked.need.place_count ?? 0) > 1 && picked.need.places && (
+          <div className="small" style={{ marginTop: 6 }}>
+            <strong>Found in {picked.need.place_count} places:</strong>{" "}
+            {picked.need.places.map((x) => `${x.name} (${LEVELS[x.level].label.toLowerCase()})`).join(", ")}
+            {(picked.need.place_count ?? 0) > picked.need.places.length ? "…" : ""}
+          </div>
+        )}
       </div>
       {first && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

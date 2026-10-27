@@ -83,8 +83,11 @@ def test_refugees_latest_year_totals():
 def test_un_signal_scores():
     assert score_pin(10, 0.45) == 85 and score_pin(10, 0.3) == 65 and score_pin(10, 0.12) == 45 and score_pin(10, 0.05) == 0
     assert score_pin(600_000, None) == 75 and score_pin(150_000, None) == 60 and score_pin(25_000, None) == 40
-    assert score_rain(140) == (50, "wet") and score_rain(70) == (40, "wet") and score_rain(-65) == (50, "dry")
-    assert score_rain(-45) == (35, "dry") and score_rain(10) == (0, None)
+    assert score_rain(140) == (25, "wet") and score_rain(70) == (0, None) and score_rain(-65) == (25, "dry")
+    assert score_rain(-45) == (0, None) and score_rain(10) == (0, None)
+    # Dry places: a big percentage of very little rain is no flood risk; no usual rain means no drought either
+    assert score_rain(115, rainfall=30, average=14) == (0, None) and score_rain(115, rainfall=320, average=150) == (25, "wet")
+    assert score_rain(-70, rainfall=3, average=10) == (0, None) and score_rain(-70, rainfall=20, average=70) == (25, "dry")
 
 
 def test_reliefweb_queries():

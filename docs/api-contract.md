@@ -273,10 +273,10 @@ of 25+. 80+ urgent (3), 55+ high (2), 30+ some (1).
 | IPC Phase 3+ share (food, ration) | HDX HAPI `food-security` | ≥30% 85 · ≥20% 65 · ≥10% 40 |
 | Staple price rise over ~3 months (ration; food −10) | HDX HAPI `food-prices-market-monitor` (WFP) | ≥20% 60 · ≥10% 45 |
 | Poverty headcount (ration, food, clothes, school, hygiene) | HDX HAPI `poverty-rate` | ≥40% 40 · ≥25% 25 |
-| Disaster alert, last 30 days (categories by type) | GDACS, Claude web scan, admin | severe 90 · moderate 65 · watch 40; unconfirmed ×0.7 |
+| Disaster alert, last 30 days (categories by type) | GDACS, Claude web scan, admin | severe 90 · moderate 65 · watch 40; unconfirmed ×0.8 |
 | Open requests at a distribution point | our points | 40, or 60 if 50+ items |
 | People in need, by sector (education → school supplies and books, health / WASH → hygiene, shelter → blankets, household and winter items, food → food and rations…) | OCHA via HDX HAPI `affected-people/humanitarian-needs` | share ≥40% 85 · ≥25% 65 · ≥10% 45; or 500k+ 75 · 100k+ 60 · 20k+ 40 |
-| Rainfall over 3 months vs the long-term average | WFP / CHIRPS via HDX HAPI `climate/rainfall` | +100% 50 · +60% 40 (flood risk: relief, hygiene, household, blankets) · −60% 50 · −40% 35 (drought risk: food, rations, hygiene) |
+| Rainfall over 3 months vs the long-term average (supporting only) | WFP / CHIRPS via HDX HAPI `climate/rainfall` | 25 when +100% **and** 50+ mm more than usual (flood risk: relief, hygiene, household, blankets), or −60% where 30+ mm usually falls (drought risk: food, rations, hygiene); last 45 days only. Below "some" on its own: it adds +5 to a real need |
 | Displaced people living in the place (relief, rations, food, hygiene, blankets, household) | IOM DTM via HDX HAPI `affected-people/idps` (each operation's latest round) | 100k+ 70 · 20k+ 60 · 5k+ 45 · 1k+ 30 (alone: high at most) |
 
 **Who works where (OCHA 3W, HDX HAPI `coordination-context/operational-presence`).** Each place in `/needs` also
@@ -285,7 +285,7 @@ no organisation working on a matching sector. UNHCR refugee totals (`affected-pe
 exist for Pakistan as a whole only, so they are saved as a short report in the library for the need finder.
 HAPI does not publish every subject for every country; the HDX source status names what was missing.
 
-A place shows the highest level found anywhere inside it.
+A place shows the highest level found anywhere inside it. For a province or city, each need also has `place_count` and `places` (the places inside with that need, highest first), and its reasons come from the top few places, not only the highest one.
 
 **Reasons in plain words.** Each reason's `why` is a short everyday sentence ("30% of people do not have enough food", "It rained 122% more than normal in the last 3 months. Floods may happen."). It also has `fresh` (`new` = last 3 months, `recent` = last 12 months, `old` = over a year, counts less), `strength` (`very strong` 80+, `strong` 55+, `medium` 30+, `weak`), and `old_year` when the data is over a year old.
 

@@ -364,6 +364,8 @@ export interface AreaNeed {
   level_name: "none" | "some" | "high" | "urgent";
   score: number;
   reasons: NeedReason[];
+  place_count?: number;                                     // how many places inside have this need
+  places?: { name: string; level: 0 | 1 | 2 | 3 }[];        // the top ones, highest first
 }
 
 export interface DepValue {

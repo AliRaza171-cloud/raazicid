@@ -6,10 +6,12 @@ strong signal). Signals:
   IPC Phase 3+ share (food, grocery)      >=30% 85 · >=20% 65 · >=10% 40
   Staple price rise over ~3 months         >=20% 60 · >=10% 45   (grocery; food a bit lower)
   Poverty headcount (province)             >=40% 40 · >=25% 25   (grocery, food, clothes, school, hygiene)
-  Disaster alert in the area (30 days)     severe 90 · moderate 65 · watch 40; unconfirmed x0.7
+  Disaster alert in the area (30 days)     severe 90 · moderate 65 · watch 40; unconfirmed x0.8
   Open requests at a distribution point    40, or 60 if 50+ items asked for
   People in need (OCHA, by sector)         share >=40% 85 · >=25% 65 · >=10% 45; or 500k+ 75 · 100k+ 60 · 20k+ 40
-  Rainfall vs long-term average (3 months) +100% 50 · +60% 40 (flood risk) · -60% 50 · -40% 35 (drought risk)
+  Rainfall vs long-term average (3 months) supporting only: 25 when 100%+ more AND 50+ mm extra (flood risk), or
+                                           60%+ less where 30+ mm usually falls (drought risk); last 45 days only.
+                                           Alone it never makes a need: dry areas swing by big percentages on little rain.
   Displaced people living here (IOM DTM)   100k+ 70 · 20k+ 60 · 5k+ 45 · 1k+ 30  (relief, rations, food, hygiene, blankets, household;
                                            alone it reaches "high": "urgent" needs a second source)
   AI web scan of the last 90 days          urgent 70 · high 55 · some 35 (with its source link)
@@ -84,7 +86,7 @@ def score_poverty(share: float) -> int:
 
 
 def score_alert(severity: AlertSeverity, confirmed: bool) -> int:
-    return round(ALERT_SCORE[severity] * (1 if confirmed else 0.7))
+    return round(ALERT_SCORE[severity] * (1 if confirmed else 0.8))
 
 
 def score_requests(quantity: int) -> int:
@@ -100,16 +102,20 @@ def score_pin(people: float, share: Optional[float]) -> int:
 RAIN_CATEGORIES = {"wet": ["emergency_relief", "hygiene", "household", "blankets"], "dry": ["food", "grocery_ration", "hygiene"]}
 
 
-def score_rain(anomaly_pct: float) -> tuple[int, Optional[str]]:
-    """(points, "wet" | "dry") from rainfall compared with the long-term average, in percent."""
-    if anomaly_pct >= 100:
-        return 50, "wet"
-    if anomaly_pct >= 60:
-        return 40, "wet"
-    if anomaly_pct <= -60:
-        return 50, "dry"
-    if anomaly_pct <= -40:
-        return 35, "dry"
+RAIN_POINTS = 25          # a supporting signal: below "some" on its own, +5 next to a real need
+RAIN_EXTRA_MM = 50        # flood risk only when this much more rain fell than usual over the 3 months
+RAIN_USUAL_MM = 30        # drought risk only where at least this much rain usually falls in those 3 months
+RAIN_MAX_AGE_DAYS = 45
+
+
+def score_rain(anomaly_pct: float, rainfall: Optional[float] = None, average: Optional[float] = None) -> tuple[int, Optional[str]]:
+    """(points, "wet" | "dry") from 3-month rainfall against the long-term average. In dry places a few millimetres
+    are a big percentage (Tharparkar, Killa Saifullah), so the millimetres must matter too when we know them."""
+    known = rainfall is not None and average is not None
+    if anomaly_pct >= 100 and (not known or rainfall - average >= RAIN_EXTRA_MM):
+        return RAIN_POINTS, "wet"
+    if anomaly_pct <= -60 and (not known or average >= RAIN_USUAL_MM):
+        return RAIN_POINTS, "dry"
     return 0, None
 
 
@@ -294,10 +300,16 @@ def recompute(db: Session) -> int:
             for slug in sector_categories(sector):
                 add(ind.location_id, slug, pts, r)
         elif ind.indicator == "rainfall_anomaly_pct":
-            pts, kind = score_rain(ind.value)
+            if ind.period_end and (datetime.now(timezone.utc).date() - ind.period_end).days > RAIN_MAX_AGE_DAYS:
+                continue   # last season's rain says nothing about today
+            meta = ind.meta or {}
+            mm = lambda v: float(v) if isinstance(v, (int, float)) else None  # noqa: E731
+            pts, kind = score_rain(ind.value, mm(meta.get("rainfall")), mm(meta.get("average")))
             if kind:
-                word, risk = ("more", "Floods may happen.") if kind == "wet" else ("less", "Crops and water may run short (drought).")
-                r = {"why": f"It rained {abs(ind.value):.0f}% {word} than normal in the last 3 months. {risk}",
+                amounts = (f" ({mm(meta['rainfall']):.0f} mm instead of the usual {mm(meta['average']):.0f} mm)"
+                           if mm(meta.get("rainfall")) is not None and mm(meta.get("average")) is not None else "")
+                word, risk = ("more", "Flood risk is higher.") if kind == "wet" else ("less", "Drought risk is higher.")
+                r = {"why": f"Also: it rained {abs(ind.value):.0f}% {word} than normal in the last 3 months{amounts}. {risk}",
                      "source": "WFP rainfall data (via HDX)", "date": when}
                 for slug in RAIN_CATEGORIES[kind]:
                     add(ind.location_id, slug, pts, r)
@@ -353,18 +365,39 @@ def recompute(db: Session) -> int:
     return count
 
 
+def merged_reasons(levels: list[Any], limit: int = 5) -> list[dict]:
+    """Reasons for a larger place: all reasons of the place with the highest need, then the main reason of the next
+    places (an earthquake in Khuzdar must not hide behind rain in Killa Saifullah). Pure, unit-tested."""
+    if not levels:
+        return []
+    out = list(levels[0].reasons or [])[:3]
+    seen = {(r.get("why"), r.get("place")) for r in out}
+    for nl in levels[1:]:
+        for r in (nl.reasons or [])[:1]:
+            if (r.get("why"), r.get("place")) not in seen and len(out) < limit:
+                out.append(r)
+                seen.add((r.get("why"), r.get("place")))
+    return out
+
+
 def area_needs(db: Session, parent_id: Optional[uuid.UUID]) -> dict[str, Any]:
     """Needs for a place and each place under it (provinces when parent_id is None).
     Each row shows, per category, the highest level found anywhere inside that place."""
     cats = {c.id: c.name for c in db.scalars(select(Category))}
 
+    names = {l.id: l.name for l in db.scalars(select(Location))}
+
     def summary(loc_ids: list[uuid.UUID]) -> list[dict]:
-        best: dict[int, NeedLevel] = {}
+        by_cat: dict[int, list[NeedLevel]] = defaultdict(list)
         for nl in db.scalars(select(NeedLevel).where(NeedLevel.location_id.in_(loc_ids))):
-            if nl.category_id not in best or nl.score > best[nl.category_id].score:
-                best[nl.category_id] = nl
-        rows = [{"category_id": cid, "name": cats.get(cid, "?"), "level": nl.level, "level_name": LEVEL_NAMES[nl.level],
-                 "score": round(nl.score), "reasons": nl.reasons} for cid, nl in best.items()]
+            by_cat[nl.category_id].append(nl)
+        rows = []
+        for cid, levels in by_cat.items():
+            levels.sort(key=lambda nl: -nl.score)
+            rows.append({"category_id": cid, "name": cats.get(cid, "?"), "level": levels[0].level,
+                         "level_name": LEVEL_NAMES[levels[0].level], "score": round(levels[0].score),
+                         "reasons": merged_reasons(levels), "place_count": len(levels),
+                         "places": [{"name": names.get(nl.location_id, "?"), "level": nl.level} for nl in levels[:6]]})
         return sorted(rows, key=lambda r: (-r["score"], r["category_id"]))
 
     slugs = {c.id: c.slug for c in db.scalars(select(Category))}

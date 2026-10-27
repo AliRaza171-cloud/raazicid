@@ -21,9 +21,10 @@ def test_un_signals_and_neglected_places(client, db):
         # 30% of Lyari needs shelter help -> blankets / household / winter: high (65)
         NeedIndicator(location_id=lyari, indicator="people_in_need", value=90000, source_id=sid, period_end=date.today(),
                       meta={"sector": "Emergency Shelter and NFI", "share": 0.3}),
-        # Saddar: 70% less rain than normal -> drought risk for food (50, some)
+        # Saddar: some food crisis (IPC 12%: 40) and 70% less rain than usual (20 mm instead of 70): drought risk adds to it
+        NeedIndicator(location_id=saddar, indicator="ipc_phase3plus_share", value=0.12, source_id=sid, period_end=date.today()),
         NeedIndicator(location_id=saddar, indicator="rainfall_anomaly_pct", value=-70, source_id=sid, period_end=date.today(),
-                      meta={"period": "3-month"}),
+                      meta={"period": "3-month", "rainfall": 20, "average": 70}),
         # Only health organisations work in Lyari
         NeedIndicator(location_id=lyari, indicator="orgs_present", value=2, source_id=sid, period_end=date.today(),
                       meta={"sectors": {"Health": ["WHO", "MSF"]}}),

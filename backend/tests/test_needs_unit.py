@@ -18,7 +18,7 @@ def test_signal_scores():
     assert score_price(0.25) == 60 and score_price(0.12) == 45 and score_price(0.04) == 0
     assert score_poverty(0.45) == 40 and score_poverty(0.30) == 25 and score_poverty(0.1) == 0
     assert score_alert(AlertSeverity.severe, True) == 90
-    assert score_alert(AlertSeverity.severe, False) == 63      # not confirmed yet counts less
+    assert score_alert(AlertSeverity.severe, False) == 72      # not confirmed yet counts less
     assert score_requests(10) == 40 and score_requests(80) == 60
 
 
@@ -118,3 +118,12 @@ def test_freshness_and_strength_words():
     assert freshness(date(2026, 9, 1), today) == "new" and freshness(date(2026, 1, 1), today) == "recent"
     assert freshness(date(2025, 7, 1), today) == "old" and freshness(None, today) == "new"
     assert [strength(p) for p in (90, 60, 40, 10)] == ["very strong", "strong", "medium", "weak"]
+
+
+def test_bigger_place_shows_reasons_from_several_places():
+    from types import SimpleNamespace as NS
+    from app.services.needs import merged_reasons
+    rain = NS(score=50, reasons=[{"why": "Rain", "place": "Killa Saifullah"}])
+    quake = NS(score=40, reasons=[{"why": "Earthquake near Khuzdar", "place": "Khuzdar"}, {"why": "x", "place": "Khuzdar"}])
+    assert [r["why"] for r in merged_reasons([rain, quake])] == ["Rain", "Earthquake near Khuzdar"]
+    assert merged_reasons([]) == []
