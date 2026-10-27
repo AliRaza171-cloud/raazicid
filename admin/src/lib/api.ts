@@ -444,7 +444,8 @@ export interface Alert {
   recommend_notes?: string[];
   families?: number | null;
   sources: { title: string; url: string | null; publisher: string | null; published_at: string | null }[];
-  ngos: { id: string; name: string; city: string; city_id: string; phone: string | null; address: string; why?: string; works_text?: string | null; active_here?: boolean; checked?: boolean }[];
+  ngos: { id: string; name: string; city: string; city_id: string; phone: string | null; address: string; why?: string; works_text?: string | null; active_here?: boolean; checked?: boolean;
+    takes?: string[]; takes_everything?: boolean; lat?: number; lng?: number; location_approx?: boolean }[];
 }
 
 export interface DataSource {

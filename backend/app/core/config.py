@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     WEB_SCAN_EVERY_HOURS: int = 0     # AI web scan for new disasters: 0 = only when an admin presses the button
     AI_NEEDS_EVERY_DAYS: int = 0      # AI web scan for current needs across Pakistan: 0 = only from the admin button
     NGO_FINDER_EVERY_HOURS: int = 24  # find NGOs where places in need have none (OpenStreetMap + OCHA 3W free; 0 = off)
+    FIND_NGOS_FOR_ALERTS: bool = True # when an alert is added or confirmed, find NGOs in its places (tests turn this off)
     NGO_AI_SEARCHES_PER_RUN: int = 2  # web searches (AI credit) per run for places OpenStreetMap and 3W could not cover
     NEED_DATA_MAX_YEARS: float = 2    # data older than this (e.g. the 2018 poverty survey) is not used for need levels
 

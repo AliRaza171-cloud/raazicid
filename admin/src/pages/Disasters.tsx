@@ -213,7 +213,7 @@ function AlertPanel({ id, cats, onClose, onChanged }: { id: string; cats: Catego
       <section style={{ borderTop: "1px solid var(--line)", paddingTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
         <div>
           <h3 style={{ margin: 0, fontSize: 15 }}>NGOs near this disaster</h3>
-          <p className="muted small" style={{ margin: "2px 0 0" }}>Our riders take donations for this disaster to these NGOs, who give them to the affected families. Red = working in the affected districts (OCHA 3W).</p>
+          <p className="muted small" style={{ margin: "2px 0 0" }}>Drop donations for this disaster at these NGOs' offices: they give them to the affected families. Only NGOs that take what this disaster needs are listed. Red = working in the affected districts (OCHA 3W). Found automatically when the alert is confirmed.</p>
         </div>
         {a.ngos.length > 0 ? (
           a.ngos.map((n) => (
@@ -224,6 +224,15 @@ function AlertPanel({ id, cats, onClose, onChanged }: { id: string; cats: Catego
                 <span className="muted small">{n.phone ?? ""}</span>
               </div>
               <span className="small" style={{ color: n.active_here ? "var(--urgent)" : "var(--ink-2)" }}>{n.why ?? n.city}</span>
+              <span className="small">
+                {n.takes_everything ? "Takes: items not confirmed yet (call them)" : `Takes: ${(n.takes ?? []).join(", ").toLowerCase()}`}
+              </span>
+              <span className="muted small">
+                {n.location_approx ? "Office address not known yet" : n.address}
+                {!n.location_approx && n.lat != null && n.lng != null && (
+                  <> · <a href={`https://www.google.com/maps/dir/?api=1&destination=${n.lat},${n.lng}`} target="_blank" rel="noreferrer">Directions</a></>
+                )}
+              </span>
               {n.works_text && <span className="muted small">{n.works_text}</span>}
             </div>
           ))

@@ -145,3 +145,36 @@ def nearest_food_ngo_km(db: Session, lat: float, lng: float) -> Optional[float]:
         km = distance_km(lat, lng, n.lat, n.lng)
         best = km if best is None or km < best else best
     return best
+
+
+def ngos_for_need(db: Session, location_id: uuid.UUID, category_id: int, limit: int = 8) -> list[dict]:
+    """NGOs to drop this item at for this place: offices in the place or within 30 km that take the item, and NGOs
+    OCHA 3W says work there. Order: reachable offices first, then working there (3W), then those that list the item
+    (not just "everything"), then checked ones, then nearest."""
+    loc = db.get(Location, location_id)
+    if loc is None:
+        return []
+    inside = set(descendant_ids(db, location_id))
+    chain = [db.get(Location, i) for i in ancestor_ids(db, location_id)]
+    here = inside | {l.id for l in chain if l is not None and l.level != LocationLevel.province}
+    centre = next(((l.lat, l.lng) for l in chain if l is not None and l.lat is not None and l.level != LocationLevel.province), None)
+    index = load_index(db)
+    out = []
+    for n in db.scalars(select(Ngo).where(Ngo.is_active.is_(True))):
+        listed = {c.id for c in n.categories}
+        if listed and category_id not in listed:
+            continue
+        works = works_for(n.name, index)
+        active = bool(works.location_ids & here)
+        dist = None if (centre is None or n.location_approx) else round(distance_km(centre[0], centre[1], n.lat, n.lng), 1)
+        reachable = n.location_id in inside or (dist is not None and dist <= 30) or (n.location_approx and n.location_id in here)
+        if not (reachable or active):
+            continue
+        out.append({"id": str(n.id), "name": n.name, "address": n.address, "phone": n.phone,
+                    "city": location_path(db, n.location_id)[-1], "distance_km": dist, "reachable": reachable,
+                    "active_here": active, "works_text": works.text(), "takes_listed": bool(listed),
+                    "checked": n.phone_confirmed_at is not None and n.ban_checked_at is not None,
+                    "location_approx": n.location_approx, "lat": n.lat, "lng": n.lng, "found_by": n.found_by})
+    out.sort(key=lambda x: (not x["reachable"], not x["active_here"], not x["takes_listed"], not x["checked"],
+                            x["distance_km"] if x["distance_km"] is not None else 999))
+    return out[:limit]

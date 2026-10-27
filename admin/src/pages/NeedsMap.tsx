@@ -12,7 +12,7 @@ const GAP_RING = "#a2361a";
 const GAP_KM: Record<string, number> = { city: 30, region: 30, area: 10 };
 
 type Crumb = { id: string | null; name: string };
-type Picked = { place: string; need: AreaNeed };
+type Picked = { place: string; placeId: string | null; need: AreaNeed };
 type Nearest = { ngo: Ngo; km: number } | null;
 type Gap = { row: AreaRow; level: number; need: string; nearest: Nearest; why: string };
 
@@ -67,12 +67,12 @@ export default function NeedsMap() {
   // Find NGOs for places in need that have none: OpenStreetMap, OCHA 3W, then web search (backend "NGO finder")
   const [filling, setFilling] = useState<string | null>(null);   // place id being filled, or "all"
   const [fillMsg, setFillMsg] = useState<string | null>(null);
-  const fillGaps = async (locationId: string | null, key: string) => {
+  const fillGaps = async (locationId: string | null, key: string, categoryId?: number) => {
     setFilling(key);
     setFillMsg(null);
     setError(null);
     try {
-      const r = await api<{ ok: boolean; status: string }>("/admin/ngos/fill-gaps", { method: "POST", body: JSON.stringify({ location_id: locationId, use_ai: true }) });
+      const r = await api<{ ok: boolean; status: string }>("/admin/ngos/fill-gaps", { method: "POST", body: JSON.stringify({ location_id: locationId, use_ai: true, category_id: categoryId ?? null }) });
       if (r.ok) setFillMsg(r.status);
       else setError(r.status);
       loadPoints();
@@ -252,6 +252,8 @@ export default function NeedsMap() {
 
         {scanning && <div className="flash" style={{ background: "var(--info-bg)", color: "var(--info)" }} role="status">The AI is reading recent news and UN / NGO reports. This takes 1–4 minutes; you can keep using the page.</div>}
         {scanMsg && <div className="flash ok" role="status">{scanMsg}</div>}
+        {filling && <div className="flash" style={{ background: "var(--info-bg)", color: "var(--info)" }} role="status">Finding NGOs: OpenStreetMap, OCHA 3W, then a web search if needed. This can take a few minutes.</div>}
+        {fillMsg && <div className="flash ok" role="status">{fillMsg}</div>}
         {error && <div className="flash bad" role="alert">{error}</div>}
 
         <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
@@ -294,7 +296,7 @@ export default function NeedsMap() {
                           return (
                             <td key={c.id} className={`cell lv${lv}${sel ? " sel" : ""}`} title={n ? `${c.name}: ${n.level_name}` : c.name}
                               style={dim ? { opacity: 0.35 } : undefined}
-                              onClick={() => { if (n) { setFocusRow(null); setFocusPoint(null); setPicked({ place: r.name, need: n }); } }}>
+                              onClick={() => { if (n) { setFocusRow(null); setFocusPoint(null); setPicked({ place: r.name, placeId: r.id, need: n }); } }}>
                               {lv ? LEVELS[lv].label : ""}
                             </td>
                           );
@@ -310,15 +312,15 @@ export default function NeedsMap() {
 
           <aside className="card" style={{ flex: "1 1 300px", display: "flex", flexDirection: "column", gap: 12 }} aria-label="Details">
             {picked ? (
-              <Reasons picked={picked} />
+              <Reasons picked={picked} onFind={(id) => fillGaps(id, id, picked.need.category_id)} finding={filling !== null} />
             ) : row ? (
               <PlacePanel dep={dep?.rows.find((d) => d.id === row.id)?.values ?? null} depLabels={dep?.measures ?? []} row={row} categoryId={categoryId} levelOf={levelOf} nearest={nearestFor(row, categoryId ?? row.needs[0]?.category_id ?? null)}
                 gap={gaps.find((g) => g.row.id === row.id) ?? null}
-                onReason={(n) => setPicked({ place: row.name, need: n })} onOpen={() => open(row)} />
+                onReason={(n) => setPicked({ place: row.name, placeId: row.id, need: n })} onOpen={() => open(row)} />
             ) : point ? (
               <NgoPanel p={point} />
             ) : (
-              <Summary here={here} data={data} onPick={(n) => setPicked({ place: here.name, need: n })} />
+              <Summary here={here} data={data} onPick={(n) => setPicked({ place: here.name, placeId: here.id, need: n })} />
             )}
           </aside>
         </div>
@@ -375,7 +377,6 @@ export default function NeedsMap() {
               </button>
             )}
           </div>
-          {fillMsg && <div className="flash ok" role="status" style={{ margin: "10px 18px 0" }}>{fillMsg}</div>}
           {gaps.length === 0 ? (
             <p className="muted" style={{ padding: "10px 18px 16px", margin: 0 }}>
               {data ? "No gaps: every place in high or urgent need has an NGO nearby." : "Loading…"}
@@ -444,7 +445,56 @@ function ReasonCard({ r, place, main }: { r: NeedReason; place: string; main: bo
   );
 }
 
-function Reasons({ picked }: { picked: Picked }) {
+type NeedNgo = {
+  id: string; name: string; address: string; phone: string | null; city: string; distance_km: number | null;
+  reachable: boolean; active_here: boolean; works_text: string | null; takes_listed: boolean; checked: boolean;
+  location_approx: boolean; lat: number; lng: number; found_by: string;
+};
+
+/** "Where to drop it": NGOs that take this item for this place, from /admin/ngos/for-need. */
+function DropAt({ picked, onFind, finding }: { picked: Picked; onFind: (placeId: string) => void; finding: boolean }) {
+  const [ngos, setNgos] = useState<NeedNgo[] | null>(null);
+  useEffect(() => {
+    setNgos(null);
+    if (!picked.placeId) return;
+    api<NeedNgo[]>(`/admin/ngos/for-need?location_id=${picked.placeId}&category_id=${picked.need.category_id}`)
+      .then(setNgos).catch(() => setNgos([]));
+  }, [picked.placeId, picked.need.category_id, finding]);
+  if (!picked.placeId) return null;
+  const item = picked.need.name.toLowerCase();
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div className="kpi-label">NGOs that take {item} here</div>
+      {ngos === null ? <span className="muted small">Loading…</span> : ngos.length === 0 ? (
+        <div className="flash" style={{ background: "var(--warn-bg)", color: "var(--warn)" }}>
+          We know no NGO in or near {picked.place} that takes {item}.
+          <div style={{ marginTop: 6 }}>
+            <button className="btn small" disabled={finding} onClick={() => onFind(picked.placeId as string)}>{finding ? "Finding NGOs…" : `Find NGOs in ${picked.place}`}</button>
+          </div>
+        </div>
+      ) : ngos.map((n) => (
+        <div key={n.id} style={{ border: "1px solid var(--line)", borderRadius: 12, padding: "8px 10px", borderLeft: `3px solid ${n.active_here ? "var(--urgent)" : "var(--line)"}` }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap" }}>
+            <strong>{n.name}</strong>
+            {n.checked ? <span className="chip ok" style={{ height: 20, fontSize: 11 }}>✓ Checked</span>
+              : <span className="chip" style={{ height: 20, fontSize: 11, background: "var(--warn-bg)", color: "var(--warn)" }}>Call first</span>}
+            {!n.takes_listed && <span className="chip wait" style={{ height: 20, fontSize: 11 }} title="No item list yet: ask them">Items not confirmed</span>}
+          </div>
+          <div className="small" style={{ color: "var(--ink-2)" }}>
+            {n.location_approx ? `${n.city}: office address not known yet` : `${n.address}${n.distance_km !== null ? ` · ${n.distance_km} km` : ""}`}
+            {n.phone ? ` · ${n.phone}` : ""}
+          </div>
+          {n.active_here && <div className="small" style={{ color: "var(--urgent)", fontWeight: 600 }}>{n.works_text ?? "Works here (OCHA 3W)"}</div>}
+          {!n.reachable && <div className="muted small">Works here, but its office is in {n.city}: ask where to drop.</div>}
+          {!n.location_approx && <a className="small" href={`https://www.google.com/maps/dir/?api=1&destination=${n.lat},${n.lng}`} target="_blank" rel="noreferrer">Directions in Google Maps</a>}
+        </div>
+      ))}
+      {ngos && ngos.length > 0 && <Link className="small" to="/ngos">All NGOs</Link>}
+    </div>
+  );
+}
+
+function Reasons({ picked, onFind, finding }: { picked: Picked; onFind: (placeId: string) => void; finding: boolean }) {
   const [first, ...rest] = picked.need.reasons;
   const lv = picked.need.level;
   return (
@@ -473,6 +523,7 @@ function Reasons({ picked }: { picked: Picked }) {
           {rest.map((r, i) => <ReasonCard key={i} r={r} place={picked.place} main={false} />)}
         </div>
       )}
+      <DropAt picked={picked} onFind={onFind} finding={finding} />
       <details className="small" style={{ color: "var(--muted)" }}>
         <summary style={{ cursor: "pointer" }}>How do we decide the level?</summary>
         <ul style={{ margin: "6px 0 0", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 3 }}>

@@ -41,3 +41,46 @@ def test_fill_gaps_with_openstreetmap_and_3w(client, db, monkeypatch):
         db.execute(delete(Ngo).where(Ngo.location_id == sukkur))
         db.execute(delete(NeedIndicator).where(NeedIndicator.id == w3.id))
         db.commit()
+
+
+def test_earthquake_finds_ngos_and_needs_show_where_to_drop(client, db, monkeypatch):
+    from app.services.sources import ngo_gaps
+    from tests.test_donations_api import make_ngo
+
+    admin_h = admin_headers(client, db)
+    khuzdar = uuid.UUID(area(db, "Khuzdar"))
+    sid = db.scalar(select(Source.id).where(Source.kind == SourceKind.hdx_hapi))
+    w3 = NeedIndicator(location_id=khuzdar, indicator="orgs_present", value=2, source_id=sid, period_end=date(2025, 12, 31),
+                       meta={"sectors": {"Emergency Shelter and NFI": ["NRC", "UNHCR"]}, "names": {"NRC": "Norwegian Refugee Council"}})
+    db.add(w3)
+    db.commit()
+    monkeypatch.setattr(ngo_sources, "osm_offices", lambda lat, lng, radius: [
+        {"name": "Khuzdar Welfare Trust", "lat": 27.81, "lng": 66.61, "address": "Main Bazaar", "phone": "0848-1",
+         "website": None, "kind": "ngo", "url": "https://www.openstreetmap.org/node/7"}])
+    alert = client.post(f"{API}/admin/alerts", headers=admin_h, json={
+        "type": "earthquake", "severity": "moderate", "title": "Earthquake near Khuzdar", "location_ids": [str(khuzdar)],
+        "figures": {}}).json()
+    try:
+        # What runs in the background when an alert is added or confirmed (turned off in tests: run it here)
+        status = ngo_gaps.for_alerts(db, uuid.UUID(alert["id"]), use_ai=False)
+        assert "Earthquake near Khuzdar" in status and "2 added" in status
+        near = {n["name"]: n for n in client.get(f"{API}/admin/alerts/{alert['id']}", headers=admin_h).json()["ngos"]}
+        nrc, trust = near["Norwegian Refugee Council"], near["Khuzdar Welfare Trust"]
+        assert nrc["active_here"] and "Blankets" in nrc["takes"] and "Winter support" in nrc["takes"]
+        assert trust["takes_everything"] and trust["address"] == "Main Bazaar" and "UNHCR" not in near
+
+        # Needs by area: NGOs that take blankets for Khuzdar; one that takes only food is left out
+        make_ngo(client, admin_h, db, name="Khuzdar Food Bank", where="Khuzdar", lat=27.80, lng=66.62, category_ids=[1])
+        drop = client.get(f"{API}/admin/ngos/for-need", headers=admin_h, params={"location_id": str(khuzdar), "category_id": 4}).json()
+        names = [n["name"] for n in drop]
+        assert "Khuzdar Food Bank" not in names and set(names) >= {"Norwegian Refugee Council", "Khuzdar Welfare Trust"}
+        assert drop[0]["name"] == "Norwegian Refugee Council" and drop[0]["active_here"]   # works there (3W), lists blankets
+        # Asked for one place and item, whatever the need level
+        r = client.post(f"{API}/admin/ngos/fill-gaps", headers=admin_h,
+                        json={"location_id": str(khuzdar), "category_id": 4, "use_ai": False}).json()
+        assert r["ok"] and "Khuzdar" in r["status"] and "take blankets" in r["status"]
+    finally:
+        client.post(f"{API}/admin/alerts/{alert['id']}/status", headers=admin_h, json={"status": "handled"})
+        db.execute(delete(Ngo).where(Ngo.location_id == khuzdar))
+        db.execute(delete(NeedIndicator).where(NeedIndicator.id == w3.id))
+        db.commit()

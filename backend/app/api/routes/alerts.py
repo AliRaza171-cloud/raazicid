@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -141,6 +141,9 @@ def _ngos_near(db: Session, a: DisasterAlert) -> list[dict]:
         if city is not None and city.id not in {c.id for c in cities}:
             cities.append(city)
     inside = {c.id: set(descendant_ids(db, c.id)) for c in cities}
+    advice, _ = recommend(a.type, a.severity, datetime.now(timezone.utc).date(), (a.started_at or a.created_at).date())
+    by_slug = {c.slug: c for c in db.scalars(select(Category))}
+    needed = [by_slug[x.slug] for x in advice if x.when in ("now", "soon") and x.slug in by_slug]
     out, seen = [], set()
     for n in db.scalars(select(Ngo).where(Ngo.is_active.is_(True)).order_by(Ngo.name)):
         works = works_for(n.name, index)
@@ -152,7 +155,13 @@ def _ngos_near(db: Session, a: DisasterAlert) -> list[dict]:
         why = [f"Office in {in_city.name}"] if in_city else [f"Office in {location_path(db, n.location_id)[-1]}"]
         if active:
             why.append("works in the affected districts (OCHA 3W)")
-        out.append({"id": str(n.id), "name": n.name, "city": (in_city.name if in_city else location_path(db, n.location_id)[-1]),
+        listed = {c.id for c in n.categories}
+        takes = [c.name for c in needed if not listed or c.id in listed]
+        if not takes:
+            continue   # takes none of what this disaster needs
+        out.append({"takes": takes if listed else [], "takes_everything": not listed,
+                    "lat": n.lat, "lng": n.lng, "location_approx": n.location_approx,
+                    "id": str(n.id), "name": n.name, "city": (in_city.name if in_city else location_path(db, n.location_id)[-1]),
                     "city_id": str(in_city.id if in_city else n.location_id), "phone": n.phone, "address": n.address,
                     "why": "; ".join(why), "works_text": works.text(), "active_here": active,
                     "checked": n.phone_confirmed_at is not None and n.ban_checked_at is not None})
@@ -200,8 +209,15 @@ def one(alert_id: uuid.UUID, _: User = Depends(admin_only), db: Session = Depend
     return alert_out(db, _get(db, alert_id))
 
 
+def find_ngos_in_background(alert_id: uuid.UUID) -> None:
+    """After an alert is added or confirmed: NGOs in its places that take what is needed now (NGO finder)."""
+    from app.db.session import SessionLocal
+    with SessionLocal() as db:
+        run_source(db, SourceKind.ngo_finder, {"alert_id": alert_id})
+
+
 @router.post("/admin/alerts", response_model=AlertOut, status_code=201)
-def create(body: AlertIn, admin: User = Depends(admin_only), db: Session = Depends(get_db)):
+def create(body: AlertIn, background: BackgroundTasks, admin: User = Depends(admin_only), db: Session = Depends(get_db)):
     """An alert the admin heard about directly (phone call, field team). Confirmed straight away."""
     locs = [db.get(Location, i) for i in body.location_ids]
     if any(l is None for l in locs):
@@ -215,12 +231,17 @@ def create(body: AlertIn, admin: User = Depends(admin_only), db: Session = Depen
     suggest_alert_needs(db, a)
     db.commit()
     recompute(db)
+    if settings.FIND_NGOS_FOR_ALERTS:
+        background.add_task(find_ngos_in_background, a.id)
     return alert_out(db, a)
 
 
 @router.post("/admin/alerts/{alert_id}/status", response_model=AlertOut)
-def set_status(alert_id: uuid.UUID, body: StatusIn, admin: User = Depends(admin_only), db: Session = Depends(get_db)):
+def set_status(alert_id: uuid.UUID, body: StatusIn, background: BackgroundTasks, admin: User = Depends(admin_only),
+               db: Session = Depends(get_db)):
     a = _get(db, alert_id)
+    if body.status == "confirmed" and a.status != AlertStatus.confirmed and settings.FIND_NGOS_FOR_ALERTS:
+        background.add_task(find_ngos_in_background, a.id)
     a.status = AlertStatus(body.status)
     if a.status == AlertStatus.confirmed:
         a.confirmed_by, a.confirmed_at = admin.id, datetime.now(timezone.utc)

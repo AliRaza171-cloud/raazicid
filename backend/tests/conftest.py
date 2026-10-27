@@ -11,6 +11,7 @@ os.environ["ENABLE_SCHEDULER"] = "false"   # no background fetching during tests
 os.environ["OPENAI_API_KEY"] = ""
 os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["ENABLE_EMBEDDINGS"] = "false"
+os.environ["FIND_NGOS_FOR_ALERTS"] = "false"   # no OpenStreetMap / web lookups after a test adds an alert
 
 import pytest
 from fastapi.testclient import TestClient

@@ -20,7 +20,7 @@ from app.services import llm, ngo_finder, ngo_sources
 from app.services.sources import ngo_gaps
 from app.services.sources.runner import run_source
 from app.services.locations import descendant_ids
-from app.services.ngos import ngo_out, search_place
+from app.services.ngos import ngo_out, ngos_for_need, search_place
 
 router = APIRouter(prefix="/admin/ngos", tags=["admin: NGOs"])
 admin_only = require_roles(Role.admin)
@@ -61,6 +61,14 @@ def list_ngos(
         ngos = [n for n in ngos if not n.categories or category_id in {c.id for c in n.categories}]
     index = ngo_sources.load_index(db)
     return [ngo_out(db, n, index) for n in ngos]
+
+
+@router.get("/for-need")
+def for_need(location_id: uuid.UUID, category_id: int, _: User = Depends(admin_only), db: Session = Depends(get_db)):
+    """NGOs to drop this item at for this place (Needs by area: "NGOs that take blankets here")."""
+    if db.get(Location, location_id) is None:
+        raise api_error(404, "location_not_found", "Place not found")
+    return ngos_for_need(db, location_id, category_id)
 
 
 @router.post("", response_model=NgoOut, status_code=status.HTTP_201_CREATED)
@@ -170,6 +178,7 @@ def from_openstreetmap(body: NgoSearchIn, _: User = Depends(admin_only), db: Ses
 class FillGapsIn(BaseModel):
     location_id: Optional[uuid.UUID] = None   # only places in need inside this one (all Pakistan if empty)
     use_ai: bool = True                       # also web search (AI credit) where the free sources found nothing
+    category_id: Optional[int] = None         # with location_id: NGOs for this item there, whatever the need level
 
 
 @router.post("/fill-gaps")
@@ -178,5 +187,6 @@ def fill_gaps(body: FillGapsIn, _: User = Depends(admin_only), db: Session = Dep
     search (at most NGO_AI_SEARCHES_PER_RUN). Takes from seconds to a few minutes."""
     if body.location_id and db.get(Location, body.location_id) is None:
         raise api_error(404, "location_not_found", "Place not found")
-    ok, status_line = run_source(db, SourceKind.ngo_finder, {"location_id": body.location_id, "use_ai": body.use_ai})
+    ok, status_line = run_source(db, SourceKind.ngo_finder, {"location_id": body.location_id, "use_ai": body.use_ai,
+                                                             "category_id": body.category_id})
     return {"ok": ok, "status": status_line}

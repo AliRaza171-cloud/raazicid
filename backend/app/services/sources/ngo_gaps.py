@@ -155,9 +155,10 @@ def _osm(db: Session, city: Location, centre: tuple[float, float]) -> int:
     return added
 
 
-def _from_3w(db: Session, gap: NeedSpot, city: Location, centre: tuple[float, float]) -> int:
-    """Organisations OCHA 3W says work on this need in the gap's district, saved under its city (approximate)."""
-    places = [i for i in ancestor_ids(db, gap.location_id)
+def _from_3w(db: Session, location_id: Any, slug: str, city: Location, centre: tuple[float, float]) -> int:
+    """Organisations OCHA 3W says work on this need (`slug`) in the place's district, saved under its city
+    (approximate: 3W has no office addresses)."""
+    places = [i for i in ancestor_ids(db, location_id)
               if (db.get(Location, i) or Location()).level != LocationLevel.province]
     rows = list(db.scalars(select(NeedIndicator).where(NeedIndicator.indicator == "orgs_present",
                                                        NeedIndicator.location_id.in_(places))))
@@ -171,7 +172,7 @@ def _from_3w(db: Session, gap: NeedSpot, city: Location, centre: tuple[float, fl
             for o in orgs:
                 by_org.setdefault(o, []).append(sector)
         district = location_path(db, ind.location_id)[-1]
-        for name, sectors in candidates_from_3w(by_org, meta.get("names") or {}, gap.slug):
+        for name, sectors in candidates_from_3w(by_org, meta.get("names") or {}, slug):
             if any(ngo_sources.same_org(k.name, name) for k in known):
                 continue
             slugs = sorted({s for sec in sectors for s in sector_categories(sec)})
@@ -187,7 +188,108 @@ def _from_3w(db: Session, gap: NeedSpot, city: Location, centre: tuple[float, fl
     return added
 
 
-def run(db: Session, source_id: int, location_id: Optional[Any] = None, use_ai: bool = True) -> str:
+def _takes_any(n: Ngo, category_ids: set) -> bool:
+    return not n.categories or bool({c.id for c in n.categories} & category_ids)
+
+
+def for_alerts(db: Session, alert_id: Optional[Any] = None, use_ai: bool = True) -> str:
+    """NGOs for disasters: for each active alert (or the one given), in the city of each place it names, make sure we
+    know NGOs that take the items the disaster needs now (relief.py): OpenStreetMap, OCHA 3W for those items in that
+    district, then one web search if still none. So an earthquake in Khuzdar comes with NGOs in Khuzdar to drop at."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.models import DisasterAlert
+    from app.models.enums import AlertStatus
+    from app.services.relief import recommend
+    since = datetime.now(timezone.utc) - timedelta(days=30)
+    stmt = select(DisasterAlert).where(DisasterAlert.status.in_([AlertStatus.confirmed, AlertStatus.unconfirmed]),
+                                       DisasterAlert.created_at >= since)
+    if alert_id:
+        stmt = select(DisasterAlert).where(DisasterAlert.id == alert_id)
+    cats = {c.slug: c.id for c in db.scalars(select(Category))}
+    ai_left = settings.NGO_AI_SEARCHES_PER_RUN if (use_ai and llm.available()) else 0
+    lines, done = [], set()
+    alerts = [(a.id, a.title, a.type, a.severity, (a.started_at or a.created_at).date(), [l.id for l in a.locations])
+              for a in db.scalars(stmt)]
+    for _, title, kind, severity, started, loc_ids in alerts:
+        advice, _ = recommend(kind, severity, datetime.now(timezone.utc).date(), started)
+        now_slugs = [x.slug for x in advice if x.when == "now" and x.slug in cats]
+        need_ids = {cats[x] for x in now_slugs}
+        for loc_id in loc_ids:
+            city = search_place(db, loc_id)
+            if city is None or city.id in done:
+                continue
+            done.add(city.id)
+            name = city.name
+            centre = ensure_centre(db, city)
+            if centre is None:
+                lines.append(f"{name}: no map position")
+                continue
+            inside = set(descendant_ids(db, city.id))
+            def known() -> int:
+                return sum(1 for n in db.scalars(select(Ngo).where(Ngo.is_active.is_(True)))
+                           if _takes_any(n, need_ids) and (n.location_id in inside or
+                                                           distance_km(centre[0], centre[1], n.lat, n.lng) <= 30))
+            before = known()
+            added = _osm(db, city, centre)
+            for slug in now_slugs:
+                added += _from_3w(db, loc_id, slug, city, centre)
+            searched = ""
+            if known() == 0 and ai_left > 0 and now_slugs:
+                ai_left -= 1
+                try:
+                    added += ngo_finder.find_and_save(db, city.id, cats[now_slugs[0]])["added"]
+                    searched = ", web search done"
+                except (llm.LLMError, ValueError) as e:
+                    searched = f", web search failed ({str(e)[:60]})"
+            lines.append(f"{title}: {known()} NGOs in {name} take what is needed now ({before} before, {added} added{searched})")
+    return "; ".join(lines) if lines else "No active disaster alerts."
+
+
+def for_place(db: Session, location_id: Any, category_id: int, use_ai: bool = True) -> str:
+    """NGOs that take one item for one place, whatever its need level (the admin asked from Needs by area)."""
+    cat = db.get(Category, category_id)
+    city = search_place(db, location_id)
+    if cat is None or city is None:
+        return "Choose a place and an item"
+    slug, item, name = cat.slug, cat.name.lower(), city.name
+    centre = ensure_centre(db, city)
+    if centre is None:
+        return f"We have no map position for {name}"
+    inside = set(descendant_ids(db, city.id))
+
+    def known() -> int:
+        return sum(1 for n in db.scalars(select(Ngo).where(Ngo.is_active.is_(True)))
+                   if _takes_any(n, {category_id}) and (n.location_id in inside or
+                                                        distance_km(centre[0], centre[1], n.lat, n.lng) <= 30))
+    before = known()
+    added = _osm(db, city, centre) + _from_3w(db, location_id, slug, city, centre)
+    note = ""
+    if known() == 0 and use_ai and llm.available():
+        try:
+            added += ngo_finder.find_and_save(db, city.id, category_id)["added"]
+            note = " Web search done."
+        except (llm.LLMError, ValueError) as e:
+            note = f" Web search failed: {str(e)[:120]}"
+    after = known()
+    return (f"{name}: {after} NGOs we know take {item} or everything ({before} before, {added} added from "
+            f"OpenStreetMap, OCHA 3W{' and the web' if 'done' in note else ''}).{note}"
+            + ("" if after else " None yet: add one you know on the NGOs page."))
+
+
+def run(db: Session, source_id: int, location_id: Optional[Any] = None, use_ai: bool = True,
+        alert_id: Optional[Any] = None, category_id: Optional[int] = None) -> str:
+    if alert_id:   # one disaster, right after it was confirmed or added
+        return for_alerts(db, alert_id, use_ai)
+    if location_id and category_id:   # one place and item, asked from Needs by area
+        return for_place(db, location_id, category_id, use_ai)
+    alerts_line = for_alerts(db, None, use_ai) if location_id is None else ""
+    gaps_line = _gaps_run(db, location_id, use_ai)
+    return f"Disasters: {alerts_line} Places in need: {gaps_line}" if alerts_line and alerts_line != "No active disaster alerts." \
+        else gaps_line
+
+
+def _gaps_run(db: Session, location_id: Optional[Any], use_ai: bool) -> str:
     gaps = find_gaps(db, location_id)
     if not gaps:
         return "No gaps: every place in high or urgent need has an NGO nearby that takes the item."
@@ -207,7 +309,7 @@ def run(db: Session, source_id: int, location_id: Optional[Any] = None, use_ai: 
             notes.append(f"{name}: no map position")
             continue
         osm_added += _osm(db, city, centre)
-        w3_added += _from_3w(db, gap, city, centre)
+        w3_added += _from_3w(db, gap.location_id, gap.slug, city, centre)
         still = [g for g in find_gaps(db, city_id)]
         if still and ai_left > 0:
             ai_left -= 1

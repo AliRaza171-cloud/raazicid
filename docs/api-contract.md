@@ -168,7 +168,8 @@ NGO accounts and no verification step (call an NGO found on the web before the f
 | POST | `/admin/ngos/osm` | admin | `{ "location_id" }`: NGO, charity and social-facility offices on OpenStreetMap around that city (free, Overpass API); new ones added (`found_by: openstreetmap`), NGOs known only by city get their pin |
 | GET | `/admin/donations/{id}/ngo-options` | admin | NGOs that take this donation (order below) |
 
-| POST | `/admin/ngos/fill-gaps` | admin | `{ "location_id"?, "use_ai": true }`: the NGO finder for places in need (below); returns `{ok, status}` |
+| POST | `/admin/ngos/fill-gaps` | admin | `{ "location_id"?, "category_id"?, "use_ai": true }`: the NGO finder for places in need (below); with `location_id` and `category_id`: NGOs for that item in that place's city, whatever the need level; returns `{ok, status}` |
+| GET | `/admin/ngos/for-need?location_id=&category_id=` | admin | Where to drop this item for this place: NGOs that take it (or everything) with an office in the place or within 30 km, and NGOs OCHA 3W says work there; reachable first, then working there, then those that list the item, then checked, then nearest |
 
 **NGO finder for places in need** (data source `ngo_finder`, daily by itself: `NGO_FINDER_EVERY_HOURS`, default 24).
 A gap is a place (district, city or area) with high or urgent need for an item and no active NGO that takes it within
@@ -180,6 +181,11 @@ A gap is a place (district, city or area) with high or urgent need for an item a
    bodies are left out.
 3. If the city still has a gap, a **web search** for NGOs there that take the most-needed item (AI credit; at most
    `NGO_AI_SEARCHES_PER_RUN`, default 2; skipped with `use_ai: false` or no AI key).
+**Disasters.** When an alert is added or confirmed (`FIND_NGOS_FOR_ALERTS=true`), and on each daily run for active
+alerts, the finder does the same for the city of every place the alert names, for the items the disaster needs now
+(e.g. earthquake: emergency relief, blankets, food, mobility aids): OpenStreetMap, OCHA 3W for those items in that
+district, then one web search if no NGO there takes them. The alert's `ngos` only lists NGOs that take something the
+disaster needs, with `takes` (those items) or `takes_everything`, address, `lat`/`lng` and `location_approx`.
 Districts from HDX without a map centre get one from OpenStreetMap Nominatim the first time. The status says how many
 each source added and which places still have no NGO. Every NGO found still needs the admin's checks.
 
