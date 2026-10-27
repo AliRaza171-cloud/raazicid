@@ -43,3 +43,7 @@ def test_parse_osm_offices():
     assert rows[1]["lat"] == 25.4 and rows[1]["kind"] == "shelter" and rows[1]["url"] == "https://www.openstreetmap.org/way/2"
     q = overpass_query(25.39, 68.37, 15000)
     assert "around:15000,25.39,68.37" in q and '"office"~' in q and "social_facility" in q
+    assert "Edhi" in q and "Saylani" in q and "JDC" in q and '"name"~' in q   # charity networks found by name too
+    edhi = parse_osm({"elements": [{"type": "node", "id": 5, "lat": 27.8, "lon": 66.6,
+                                    "tags": {"name": "Edhi Centre Khuzdar", "amenity": "ambulance_station"}}]})
+    assert edhi[0]["name"] == "Edhi Centre Khuzdar" and edhi[0]["kind"] == "ambulance station"

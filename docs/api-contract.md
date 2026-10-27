@@ -165,7 +165,7 @@ NGO accounts and no verification step (call an NGO found on the web before the f
 | POST | `/admin/ngos` | admin | Add one you know: name, location_id, address, lat, lng, phone?, website?, about?, takes_cooked_food, category_ids (empty = takes everything) |
 | PATCH | `/admin/ngos/{id}` | admin | Edit; moving the pin clears `location_approx`; `is_active: false` hides it |
 | POST | `/admin/ngos/search` | admin | `{ "location_id", "category_id"? }`: web search for NGOs in that place's city (1–3 min, uses AI credit), saved and returned |
-| POST | `/admin/ngos/osm` | admin | `{ "location_id" }`: NGO, charity and social-facility offices on OpenStreetMap around that city (free, Overpass API); new ones added (`found_by: openstreetmap`), NGOs known only by city get their pin |
+| POST | `/admin/ngos/osm` | admin | `{ "location_id" }`: NGO, charity and social-facility offices on OpenStreetMap around that city (free, Overpass API), plus centres of the big charity networks found by name whatever their tag (Edhi, Saylani, JDC, Alkhidmat, Chhipa, Akhuwat, Rizq, Robin Hood Army; English and Urdu names); new ones added (`found_by: openstreetmap`), NGOs known only by city get their pin |
 | GET | `/admin/donations/{id}/ngo-options` | admin | NGOs that take this donation (order below) |
 
 | POST | `/admin/ngos/fill-gaps` | admin | `{ "location_id"?, "category_id"?, "use_ai": true }`: the NGO finder for places in need (below); with `location_id` and `category_id`: NGOs for that item in that place's city, whatever the need level; returns `{ok, status}` |

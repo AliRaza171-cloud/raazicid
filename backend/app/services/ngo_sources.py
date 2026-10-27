@@ -123,13 +123,22 @@ def load_index(db: Session) -> list[Presence]:
 
 # ---------- OpenStreetMap (pure parser, unit-tested) ----------
 
+# Pakistan's big charity networks that take donated goods. On the map their centres are often tagged as an ambulance
+# station, a clinic or a shop, not as an NGO office, so they are also looked for by name (English and Urdu).
+NETWORKS = ["Edhi", "Saylani", "Sailani", "JDC", "Al-?Khidmat", "Chhipa", "Chippa", "Akhuwat", "Rizq", "Robin Hood Army",
+            "ایدھی", "سیلانی", "الخدمت", "چھیپا", "اخوت"]
+
+
 def overpass_query(lat: float, lng: float, radius_m: int) -> str:
     around = f"(around:{radius_m},{lat},{lng})"
+    names = "|".join(NETWORKS)
     return (f'[out:json][timeout:25];('
             f'nwr["office"~"^(ngo|charity|foundation|association|non_profit)$"]{around};'
             f'nwr["amenity"="social_facility"]{around};'
             f'nwr["social_facility"]{around};'
-            f');out center tags 150;')
+            f'nwr["name"~"{names}",i]{around};'
+            f'nwr["name:en"~"{names}",i]{around};'
+            f');out center tags 200;')
 
 
 def parse_osm(data: dict[str, Any]) -> list[dict[str, Any]]:
