@@ -302,6 +302,11 @@ export interface NgoOption {
   found_by: string;
   source_url: string | null;
   items_30d: number;
+  works_text?: string | null;    // OCHA 3W: where it works by sector
+  disaster?: string | null;      // why it suits a disaster this donation can help
+  phone_confirmed?: boolean;
+  ban_checked?: boolean;
+  registration?: string | null;
 }
 
 export interface Ngo {
@@ -324,6 +329,20 @@ export interface Ngo {
   items_30d: number;
   created_at: string;
   place_warning?: string | null;
+  works?: { place: string; sectors: string[] }[];   // OCHA 3W, matched by name
+  works_text?: string | null;
+  phone_confirmed_at?: string | null;               // called: they take our items
+  ban_checked_at?: string | null;                   // not on a banned-organisation list
+  registration?: string | null;                     // e.g. PCP certified
+}
+
+export interface NgoOsm {
+  place: string;
+  found: number;
+  added: number;
+  located: number;
+  status: string;
+  ngos: Ngo[];
 }
 
 export interface NgoSearch {
@@ -425,7 +444,7 @@ export interface Alert {
   recommend_notes?: string[];
   families?: number | null;
   sources: { title: string; url: string | null; publisher: string | null; published_at: string | null }[];
-  ngos: { id: string; name: string; city: string; city_id: string; phone: string | null; address: string }[];
+  ngos: { id: string; name: string; city: string; city_id: string; phone: string | null; address: string; why?: string; works_text?: string | null; active_here?: boolean; checked?: boolean }[];
 }
 
 export interface DataSource {

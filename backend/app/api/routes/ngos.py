@@ -1,6 +1,8 @@
-"""NGOs our riders deliver to (admin): list, add or edit by hand, and find more with a web search."""
+"""NGOs our riders deliver to (admin): list, add or edit by hand, find more with a web search or on OpenStreetMap,
+and record the checks (confirmed by phone, not on a banned list)."""
 
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, status
@@ -12,10 +14,10 @@ from app.core.errors import api_error
 from app.db.session import get_db
 from app.models import Category, Location, Ngo, User
 from app.models.enums import Role
-from app.schemas.ngos import NgoIn, NgoOut, NgoSearchIn, NgoSearchOut, NgoUpdate
-from app.services import llm, ngo_finder
-from app.services.locations import descendant_ids
-from app.services.ngos import ngo_out
+from app.schemas.ngos import NgoIn, NgoOsmOut, NgoOut, NgoSearchIn, NgoSearchOut, NgoUpdate
+from app.services import llm, ngo_finder, ngo_sources
+from app.services.locations import ancestor_ids, descendant_ids
+from app.services.ngos import ngo_out, search_place
 
 router = APIRouter(prefix="/admin/ngos", tags=["admin: NGOs"])
 admin_only = require_roles(Role.admin)
@@ -54,7 +56,8 @@ def list_ngos(
     ngos = list(db.scalars(stmt))
     if category_id:
         ngos = [n for n in ngos if not n.categories or category_id in {c.id for c in n.categories}]
-    return [ngo_out(db, n) for n in ngos]
+    index = ngo_sources.load_index(db)
+    return [ngo_out(db, n, index) for n in ngos]
 
 
 @router.post("", response_model=NgoOut, status_code=status.HTTP_201_CREATED)
@@ -62,7 +65,10 @@ def add_ngo(body: NgoIn, _: User = Depends(admin_only), db: Session = Depends(ge
     """An NGO the admin knows (found_by = admin)."""
     if db.get(Location, body.location_id) is None:
         raise api_error(422, "bad_location", "Choose the city from the list")
-    n = Ngo(**body.model_dump(exclude={"category_ids"}), found_by="admin", location_approx=False, is_active=True)
+    now = datetime.now(timezone.utc)
+    n = Ngo(**body.model_dump(exclude={"category_ids", "phone_confirmed", "ban_checked"}), found_by="admin",
+            location_approx=False, is_active=True, phone_confirmed_at=now if body.phone_confirmed else None,
+            ban_checked_at=now if body.ban_checked else None)
     n.categories = _categories(db, body.category_ids)
     db.add(n)
     db.commit()
@@ -79,6 +85,12 @@ def edit_ngo(ngo_id: uuid.UUID, body: NgoUpdate, _: User = Depends(admin_only), 
         raise api_error(422, "bad_location", "Choose the city from the list")
     if "category_ids" in data:
         n.categories = _categories(db, data.pop("category_ids") or [])
+    now = datetime.now(timezone.utc)
+    for flag, column in (("phone_confirmed", "phone_confirmed_at"), ("ban_checked", "ban_checked_at")):
+        if flag in data:
+            value = data.pop(flag)
+            if value is not None:
+                setattr(n, column, (getattr(n, column) or now) if value else None)
     if data.get("lat") is not None:
         n.location_approx = False
     for key, value in data.items():
@@ -103,5 +115,51 @@ def search_web(body: NgoSearchIn, _: User = Depends(admin_only), db: Session = D
         raise api_error(502, "search_failed", str(e))
     inside = descendant_ids(db, r["place_id"])
     ngos = db.scalars(select(Ngo).where(Ngo.location_id.in_(inside), Ngo.is_active.is_(True)).order_by(Ngo.name))
+    index = ngo_sources.load_index(db)
     return NgoSearchOut(place=r["place"], found=r["found"], added=r["added"], updated=r["updated"], status=r["status"],
-                        ngos=[ngo_out(db, n) for n in ngos])
+                        ngos=[ngo_out(db, n, index) for n in ngos])
+
+
+@router.post("/osm", response_model=NgoOsmOut)
+def from_openstreetmap(body: NgoSearchIn, _: User = Depends(admin_only), db: Session = Depends(get_db)):
+    """NGO, charity and social-facility offices on OpenStreetMap in the city of `location_id` (free, no AI credit).
+    New ones are added to call (what they take is not known yet); NGOs we knew only by city get their office pin."""
+    place = search_place(db, body.location_id)
+    if place is None:
+        raise api_error(404, "location_not_found", "Place not found")
+    centre = place if place.lat is not None else next(
+        (l for l in (db.get(Location, i) for i in ancestor_ids(db, place.id)) if l is not None and l.lat is not None), None)
+    if centre is None:
+        raise api_error(422, "no_map_centre", f"We have no map position for {place.name}")
+    place_id, place_name, lat, lng, radius = place.id, place.name, centre.lat, centre.lng, ngo_sources.radius_for(place.level)
+    db.commit()   # no transaction open while waiting for Overpass
+    offices = ngo_sources.osm_offices(lat, lng, radius)
+    inside = descendant_ids(db, place_id)
+    known = list(db.scalars(select(Ngo).where(Ngo.location_id.in_(inside))))
+    added = located = 0
+    for o in offices:
+        n = next((k for k in known if ngo_sources.same_org(k.name, o["name"])), None)
+        if n is not None:
+            if n.location_approx:
+                n.lat, n.lng, n.location_approx = o["lat"], o["lng"], False
+                if o["address"] and "address not found" in n.address:
+                    n.address = o["address"]
+                located += 1
+            if not n.phone and o["phone"]:
+                n.phone = o["phone"]
+            continue
+        n = Ngo(name=o["name"], location_id=place_id, address=o["address"] or f"{place_name} (see the map pin)",
+                lat=o["lat"], lng=o["lng"], location_approx=False, phone=o["phone"], website=o["website"],
+                about=f"{o['kind'].capitalize()} on OpenStreetMap", source_url=o["url"], found_by="openstreetmap",
+                takes_cooked_food=False, is_active=True)
+        db.add(n)
+        known.append(n)
+        added += 1
+    db.commit()
+    status = (f"OpenStreetMap has {len(offices)} NGO or charity offices around {place_name}: {added} new, "
+              f"{located} we knew now have their office on the map. Call new ones to ask what they take.") if offices else \
+        f"OpenStreetMap has no NGO or charity offices tagged around {place_name} (or it is busy: try again in a minute)."
+    index = ngo_sources.load_index(db)
+    ngos = db.scalars(select(Ngo).where(Ngo.location_id.in_(inside), Ngo.is_active.is_(True)).order_by(Ngo.name))
+    return NgoOsmOut(place=place_name, found=len(offices), added=added, located=located, status=status,
+                     ngos=[ngo_out(db, n, index) for n in ngos])

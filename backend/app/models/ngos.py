@@ -1,9 +1,10 @@
 """NGOs that RAAZICID riders deliver donations to. Found by web search for a city, or added by an admin."""
 
 import uuid
+from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, Column, Float, ForeignKey, String, Table, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, String, Table, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, Timestamps, UUIDPk
@@ -33,7 +34,11 @@ class Ngo(UUIDPk, Timestamps, Base):
     about: Mapped[Optional[str]] = mapped_column(Text)          # what they do, in a sentence
     takes_cooked_food: Mapped[bool] = mapped_column(Boolean, default=False)
     source_url: Mapped[Optional[str]] = mapped_column(Text)     # the web page it was found on
-    found_by: Mapped[str] = mapped_column(String(20), default="admin")   # "web_search" or "admin"
+    found_by: Mapped[str] = mapped_column(String(20), default="admin")   # "web_search", "openstreetmap" or "admin"
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)       # an admin can hide one
+    # Checks an admin ticks before trusting an NGO found on the web or the map
+    phone_confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))   # called: they take our items
+    ban_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))       # not on a banned-organisation list
+    registration: Mapped[Optional[str]] = mapped_column(String(160))   # e.g. "PCP certified", "Punjab Charity Commission 1234"
 
     categories = relationship("Category", secondary=ngo_categories)

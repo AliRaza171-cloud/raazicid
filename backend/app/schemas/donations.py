@@ -228,3 +228,8 @@ class NgoOption(BaseModel):
     found_by: str
     source_url: Optional[str]
     items_30d: int
+    works_text: Optional[str] = None      # OCHA 3W: where it works by sector
+    disaster: Optional[str] = None        # why it suits a disaster this donation can help
+    phone_confirmed: bool = False
+    ban_checked: bool = False
+    registration: Optional[str] = None

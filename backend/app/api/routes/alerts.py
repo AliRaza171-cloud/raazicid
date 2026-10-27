@@ -16,7 +16,8 @@ from app.core.errors import api_error
 from app.db.session import get_db
 from app.models import AlertNeed, Category, DisasterAlert, Location, Ngo, Source, User
 from app.models.enums import AlertSeverity, AlertStatus, AlertType, Role, SourceKind
-from app.services.locations import descendant_ids, location_path
+from app.services.locations import ancestor_ids, descendant_ids, location_path
+from app.services.ngo_sources import load_index, works_for
 from app.services.needs import families, recompute, suggest_alert_needs
 from app.services.ngos import search_place
 from app.services.relief import recommend
@@ -129,17 +130,33 @@ def alert_out(db: Session, a: DisasterAlert) -> AlertOut:
 
 
 def _ngos_near(db: Session, a: DisasterAlert) -> list[dict]:
-    """NGOs in the cities of the alert's places (the alert may name a district or an area)."""
-    out, seen = [], set()
+    """NGOs that can take donations for this disaster: those with an office in the cities of its places, and those
+    OCHA 3W says work in its districts (they may have an office elsewhere). Checked and 3W-active ones first."""
+    index = load_index(db)
+    district_ids: set = set()
+    cities = []
     for loc in a.locations:
+        district_ids |= set(ancestor_ids(db, loc.id)[:-1]) | set(descendant_ids(db, loc.id))   # not the whole province
         city = search_place(db, loc.id)
-        if city is None or city.id in seen:
+        if city is not None and city.id not in {c.id for c in cities}:
+            cities.append(city)
+    inside = {c.id: set(descendant_ids(db, c.id)) for c in cities}
+    out, seen = [], set()
+    for n in db.scalars(select(Ngo).where(Ngo.is_active.is_(True)).order_by(Ngo.name)):
+        works = works_for(n.name, index)
+        in_city = next((c for c in cities if n.location_id in inside[c.id]), None)
+        active = bool(works.location_ids & district_ids)
+        if not (in_city or active) or n.id in seen:
             continue
-        seen.add(city.id)
-        inside = descendant_ids(db, city.id)
-        for n in db.scalars(select(Ngo).where(Ngo.location_id.in_(inside), Ngo.is_active.is_(True)).order_by(Ngo.name)):
-            out.append({"id": str(n.id), "name": n.name, "city": city.name, "city_id": str(city.id), "phone": n.phone,
-                        "address": n.address})
+        seen.add(n.id)
+        why = [f"Office in {in_city.name}"] if in_city else [f"Office in {location_path(db, n.location_id)[-1]}"]
+        if active:
+            why.append("works in the affected districts (OCHA 3W)")
+        out.append({"id": str(n.id), "name": n.name, "city": (in_city.name if in_city else location_path(db, n.location_id)[-1]),
+                    "city_id": str(in_city.id if in_city else n.location_id), "phone": n.phone, "address": n.address,
+                    "why": "; ".join(why), "works_text": works.text(), "active_here": active,
+                    "checked": n.phone_confirmed_at is not None and n.ban_checked_at is not None})
+    out.sort(key=lambda x: (not x["active_here"], not x["checked"], x["name"]))
     return out
 
 

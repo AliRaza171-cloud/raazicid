@@ -213,13 +213,18 @@ function AlertPanel({ id, cats, onClose, onChanged }: { id: string; cats: Catego
       <section style={{ borderTop: "1px solid var(--line)", paddingTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
         <div>
           <h3 style={{ margin: 0, fontSize: 15 }}>NGOs near this disaster</h3>
-          <p className="muted small" style={{ margin: "2px 0 0" }}>Our riders take donations for this disaster to these NGOs, who give them to the affected families.</p>
+          <p className="muted small" style={{ margin: "2px 0 0" }}>Our riders take donations for this disaster to these NGOs, who give them to the affected families. Red = working in the affected districts (OCHA 3W).</p>
         </div>
         {a.ngos.length > 0 ? (
           a.ngos.map((n) => (
-            <div key={n.id} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-              <strong>{n.name}</strong>
-              <span className="muted small" style={{ marginRight: "auto" }}>{n.city}{n.phone ? ` · ${n.phone}` : ""}</span>
+            <div key={n.id} style={{ display: "flex", flexDirection: "column", gap: 2, borderLeft: `3px solid ${n.active_here ? "var(--urgent)" : "var(--line)"}`, paddingLeft: 8 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                <strong>{n.name}</strong>
+                {n.checked ? <span className="chip ok" style={{ height: 20, fontSize: 11 }}>✓ Checked</span> : null}
+                <span className="muted small">{n.phone ?? ""}</span>
+              </div>
+              <span className="small" style={{ color: n.active_here ? "var(--urgent)" : "var(--ink-2)" }}>{n.why ?? n.city}</span>
+              {n.works_text && <span className="muted small">{n.works_text}</span>}
             </div>
           ))
         ) : (

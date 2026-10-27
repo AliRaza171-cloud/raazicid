@@ -59,6 +59,7 @@ def _place(r: dict[str, Any]) -> tuple[str, str, str]:
 def presence(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Per district (or province when that is all there is): {sector: [organisations]} from the latest 3W."""
     by: dict[tuple, dict[str, set]] = defaultdict(lambda: defaultdict(set))
+    names: dict[tuple, dict[str, str]] = defaultdict(dict)   # short name shown -> full name (to match NGOs we know)
     period: dict[tuple, Optional[date]] = {}
     for r in rows:
         if not r.get("admin1_name") or not r.get("sector_name"):
@@ -68,6 +69,8 @@ def presence(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         key = _place(r)
         by[key][str(r["sector_name"])].add(str(org)[:60])
+        if r.get("org_name"):
+            names[key][str(org)[:60]] = str(r["org_name"])[:160]
         end = _d(r.get("reference_period_end")) or _d(r.get("reference_period_start"))
         if end and (period.get(key) is None or end > period[key]):
             period[key] = end
@@ -75,7 +78,8 @@ def presence(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for (a1, a2, code), sectors in by.items():
         orgs = set().union(*sectors.values())
         out.append({"admin1_name": a1, "admin2_name": a2 or None, "admin2_code": code or None, "orgs": len(orgs),
-                    "sectors": {s: sorted(o) for s, o in sorted(sectors.items())}, "period_end": period.get((a1, a2, code))})
+                    "sectors": {s: sorted(o) for s, o in sorted(sectors.items())}, "period_end": period.get((a1, a2, code)),
+                    "names": names.get((a1, a2, code), {})})
     return out
 
 

@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models import Category, Location, Ngo
-from app.services import llm
+from app.services import llm, ngo_sources
 from app.services.claude import extract_json
 from app.services.geo import distance_km, in_pakistan
 from app.services.locations import ancestor_ids, descendant_ids
@@ -140,16 +140,25 @@ def find_and_save(db: Session, location_id, category_id: Optional[int] = None) -
                                         max_ngos=MAX_NGOS),
                           web={"max_uses": 5}, max_tokens=3000, timeout=240)
     found = parse_ngos(answer.text, list(cats))
+    offices: Optional[list[dict[str, Any]]] = None
     for f in found:
         spot = geocode(f["address"], city, centre if centre_is_city else None) if f["address"] else None
+        if spot is None and centre is not None:   # no address on the map: is its office tagged on OpenStreetMap?
+            if offices is None:
+                offices = ngo_sources.osm_offices(centre[0], centre[1], 20000)
+            hit = next((o for o in offices if ngo_sources.same_org(f["name"], o["name"])), None)
+            if hit:
+                spot = (hit["lat"], hit["lng"])
+                f["address"] = f["address"] or hit["address"]
+                f["phone"] = f["phone"] or hit["phone"]
         f["lat"], f["lng"], f["approx"] = (spot[0], spot[1], False) if spot else (*(centre or (30.38, 69.35)), True)
 
     inside = descendant_ids(db, city_id)
-    known = {name_key(n.name): n for n in db.scalars(select(Ngo).where(Ngo.location_id.in_(inside)))}
+    known_list = list(db.scalars(select(Ngo).where(Ngo.location_id.in_(inside))))
     by_id = {c.id: c for c in db.scalars(select(Category))}
     added = updated = 0
     for f in found:
-        n = known.get(name_key(f["name"]))
+        n = next((k for k in known_list if name_key(k.name) == name_key(f["name"]) or ngo_sources.same_org(k.name, f["name"])), None)
         if n is None:
             n = Ngo(name=f["name"], location_id=city_id, address=f["address"] or f"{city} (address not found: call first)",
                     lat=f["lat"], lng=f["lng"], location_approx=f["approx"], phone=f["phone"], website=f["website"],
@@ -157,6 +166,7 @@ def find_and_save(db: Session, location_id, category_id: Optional[int] = None) -
                     is_active=True)
             n.categories = [by_id[cats[s]] for s in f["accepts"] if s in cats]
             db.add(n)
+            known_list.append(n)
             added += 1
             continue
         changed = False

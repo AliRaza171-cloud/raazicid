@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import LocationSelect from "../components/LocationSelect";
 import { PageHeader } from "../components/Layout";
 import PinPicker, { type Centre } from "../components/PinPicker";
-import { api, type Category, type Ngo, type NgoSearch } from "../lib/api";
+import { api, type Category, type Ngo, type NgoOsm, type NgoSearch } from "../lib/api";
+import { date } from "../lib/format";
 
 type Editing = { mode: "new" } | { mode: "edit"; ngo: Ngo };
 
@@ -17,6 +18,7 @@ export default function Ngos() {
   const [editing, setEditing] = useState<Editing | null>(null);
   const [searchCat, setSearchCat] = useState("");
   const [searching, setSearching] = useState(false);
+  const [mapping, setMapping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
 
@@ -51,6 +53,22 @@ export default function Ngos() {
     }
   };
 
+  const fromMap = async () => {
+    if (!locationId) return setError("Choose a city first");
+    setMapping(true);
+    setError(null);
+    setFlash(null);
+    try {
+      const r = await api<NgoOsm>("/admin/ngos/osm", { method: "POST", body: JSON.stringify({ location_id: locationId }) });
+      setFlash(r.status);
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setMapping(false);
+    }
+  };
+
   const saved = (n: Ngo, created: boolean) => {
     setFlash(created ? `Added ${n.name}` : `Saved ${n.name}`);
     setEditing({ mode: "edit", ngo: n });
@@ -81,7 +99,9 @@ export default function Ngos() {
               {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
             <button className="btn" disabled={searching || !locationId} onClick={search}>{searching ? "Searching the web…" : "Search the web"}</button>
-            <span className="muted small">Takes 1 to 3 minutes and uses AI credit. Call an NGO before the first delivery.</span>
+            <button className="btn ghost" disabled={mapping || !locationId} onClick={fromMap}>{mapping ? "Reading the map…" : "Find offices on OpenStreetMap"}</button>
+            <span className="muted small">Web search takes 1 to 3 minutes and uses AI credit. OpenStreetMap is free and finds offices tagged as NGOs or charities.
+              Call each NGO before the first delivery.</span>
           </div>
         </section>
 
@@ -99,7 +119,7 @@ export default function Ngos() {
               </p>
             ) : (
               <table className="table">
-                <thead><tr><th>NGO</th><th>City</th><th>Takes</th><th>Last 30 days</th><th>Found</th></tr></thead>
+                <thead><tr><th>NGO</th><th>City</th><th>Takes</th><th>Checks</th><th>Found</th></tr></thead>
                 <tbody>
                   {ngos.map((n) => (
                     <tr key={n.id} className="click" onClick={() => setEditing({ mode: "edit", ngo: n })}
@@ -108,6 +128,7 @@ export default function Ngos() {
                         <strong>{n.name}</strong>
                         {!n.is_active && <span className="chip wait" style={{ marginLeft: 6 }}>Hidden</span>}
                         <div className="muted small">{[n.phone, n.about].filter(Boolean).join(" · ")}</div>
+                        {n.works_text && <div className="small" style={{ color: "var(--info)", marginTop: 2 }}>{n.works_text}</div>}
                       </td>
                       <td>
                         {n.location_path.slice(-1)[0]}
@@ -122,9 +143,16 @@ export default function Ngos() {
                             : n.categories.map((c) => <span key={c.id} className="chip wait">{c.name}</span>)}
                         </div>
                       </td>
-                      <td>{n.items_30d} donations</td>
+                      <td>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-start" }}>
+                          <CheckChip done={!!n.phone_confirmed_at} yes="Confirmed by phone" no="Not called yet" />
+                          <CheckChip done={!!n.ban_checked_at} yes="Not on banned lists" no="Banned lists not checked" />
+                          {n.registration && <span className="chip ok" style={{ height: 20, fontSize: 11 }}>{n.registration}</span>}
+                        </div>
+                        <div className="muted small" style={{ marginTop: 3 }}>{n.items_30d} donations / 30 days</div>
+                      </td>
                       <td className="small">
-                        {n.found_by === "web_search" ? "Web search" : "Added by admin"}
+                        {n.found_by === "web_search" ? "Web search" : n.found_by === "openstreetmap" ? "OpenStreetMap" : "Added by admin"}
                         {n.source_url && <div><a href={n.source_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Source</a></div>}
                       </td>
                     </tr>
@@ -162,6 +190,9 @@ function NgoPanel({ editing, cats, onClose, onSaved }: {
   const [cooked, setCooked] = useState(start?.takes_cooked_food ?? false);
   const [accepts, setAccepts] = useState<number[]>(start?.categories.map((c) => c.id) ?? []);
   const [active, setActive] = useState(start?.is_active ?? true);
+  const [phoneOk, setPhoneOk] = useState(!!start?.phone_confirmed_at);
+  const [banOk, setBanOk] = useState(!!start?.ban_checked_at);
+  const [registration, setRegistration] = useState(start?.registration ?? "");
   const [centre, setCentre] = useState<Centre | null>(start ? { name: start.location_path.slice(-1)[0] ?? "", lat: start.lat, lng: start.lng } : null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -180,6 +211,7 @@ function NgoPanel({ editing, cats, onClose, onSaved }: {
       name: name.trim(), location_id: locationId, address: address.trim(), lat: pinAt.lat, lng: pinAt.lng,
       phone: phone.trim() || null, website: website.trim() || null, about: about.trim() || null,
       takes_cooked_food: cooked, category_ids: accepts, ...(start ? { is_active: active } : {}),
+      phone_confirmed: phoneOk, ban_checked: banOk, registration: registration.trim() || null,
     };
     setBusy(true);
     setError(null);
@@ -205,6 +237,20 @@ function NgoPanel({ editing, cats, onClose, onSaved }: {
         <div className="flash" style={{ background: "var(--info-bg)", color: "var(--info)" }}>
           Found by web search{start.source_url ? <> (<a href={start.source_url} target="_blank" rel="noreferrer">source</a>)</> : ""}.
           Call them before the first delivery to check they take donations.
+        </div>
+      )}
+      {start?.works && start.works.length > 0 && (
+        <div>
+          <div className="kpi-label">Where it works (OCHA 3W)</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 4 }}>
+            {start.works.map((w) => <div key={w.place} className="small"><strong>{w.place}:</strong> {w.sectors.join(", ")}</div>)}
+          </div>
+        </div>
+      )}
+      {start?.found_by === "openstreetmap" && (
+        <div className="flash" style={{ background: "var(--info-bg)", color: "var(--info)" }}>
+          Found on OpenStreetMap{start.source_url ? <> (<a href={start.source_url} target="_blank" rel="noreferrer">map entry</a>)</> : ""}.
+          We do not know what they take yet: call them and tick the items below.
         </div>
       )}
       {start?.location_approx && (
@@ -267,6 +313,27 @@ function NgoPanel({ editing, cats, onClose, onSaved }: {
         <label style={{ display: "flex", gap: 8, alignItems: "center", margin: 0 }}>
           <input type="checkbox" checked={cooked} onChange={(e) => setCooked(e.target.checked)} /> Takes cooked food (gives it out the same day)
         </label>
+        <fieldset style={{ border: "1px solid var(--line)", borderRadius: 12, padding: "10px 12px", margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+          <legend style={{ fontSize: 13, fontWeight: 700, padding: "0 4px" }}>Checks before sending donations</legend>
+          <label style={{ display: "flex", gap: 8, alignItems: "flex-start", margin: 0, fontWeight: 500 }}>
+            <input type="checkbox" checked={phoneOk} onChange={(e) => setPhoneOk(e.target.checked)} style={{ marginTop: 3 }} />
+            <span>Confirmed by phone: they take donated items and the ticked categories
+              {start?.phone_confirmed_at && phoneOk ? <span className="muted small"> · {date(start.phone_confirmed_at)}</span> : null}</span>
+          </label>
+          <label style={{ display: "flex", gap: 8, alignItems: "flex-start", margin: 0, fontWeight: 500 }}>
+            <input type="checkbox" checked={banOk} onChange={(e) => setBanOk(e.target.checked)} style={{ marginTop: 3 }} />
+            <span>Checked: not on a banned-organisation list (NACTA, provincial Home Department)
+              {start?.ban_checked_at && banOk ? <span className="muted small"> · {date(start.ban_checked_at)}</span> : null}</span>
+          </label>
+          <div>
+            <label htmlFor="nreg">Registration (optional)</label>
+            <input id="nreg" className="input" value={registration} onChange={(e) => setRegistration(e.target.value)} placeholder="e.g. PCP certified, Punjab Charity Commission no. …" />
+          </div>
+          <span className="muted small">
+            Check at <a href="https://nacta.gov.pk" target="_blank" rel="noreferrer">nacta.gov.pk</a> (proscribed organisations) and your provincial Home Department list.
+            Certified non-profits: <a href="https://pcp.org.pk" target="_blank" rel="noreferrer">pcp.org.pk</a>. Checked NGOs are suggested first.
+          </span>
+        </fieldset>
         {start && (
           <label style={{ display: "flex", gap: 8, alignItems: "center", margin: 0 }}>
             <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Show this NGO (untick to hide it from the list and from donation choices)
@@ -277,4 +344,10 @@ function NgoPanel({ editing, cats, onClose, onSaved }: {
       </form>
     </aside>
   );
+}
+
+function CheckChip({ done, yes, no }: { done: boolean; yes: string; no: string }) {
+  return done
+    ? <span className="chip ok" style={{ height: 20, fontSize: 11 }}>✓ {yes}</span>
+    : <span className="chip" style={{ height: 20, fontSize: 11, background: "var(--warn-bg)", color: "var(--warn)" }}>{no}</span>;
 }

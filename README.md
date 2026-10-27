@@ -152,6 +152,10 @@ After pulling this version run `alembic upgrade head` once (adds the "read for n
 tables, turns "at point" and "handed out" donations into "delivered" and removes distribution points, relief camps,
 point requests and hand-outs. Then open **NGOs** in the admin web, choose a city and press **Search the web** (or add
 an NGO you know). When you accept a donation you pick the NGO; the rider drops it there and the job is done.
+Migration 0004 (run `alembic upgrade head` once more) adds the NGO checks. **Find offices on OpenStreetMap** adds
+NGO and charity offices from the free map; NGOs are matched to OCHA's who-works-where (3W) data, and during a
+disaster the NGOs working in the affected districts are suggested first. Tick "confirmed by phone" and "not on a
+banned list" on each NGO before sending donations.
 The AI then reads every library report for unmet needs; they show up in Needs by area with the report's quote and page.
 
 UN data from HDX HAPI (no extra setup, it comes with the daily HDX fetch): OCHA 3W (who works where), people in

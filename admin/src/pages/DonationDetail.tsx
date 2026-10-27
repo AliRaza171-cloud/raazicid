@@ -296,7 +296,7 @@ export default function DonationDetail() {
               <>
                 <div>
                   <h2 style={{ margin: 0, fontSize: 16 }}>Which NGO should get it?</h2>
-                  <p className="muted small" style={{ margin: "4px 0 0" }}>Our rider picks it up and drops it at the NGO. NGOs that take {d.category.name.toLowerCase()}{d.food_type === "cooked" ? " and cooked food" : ""}, nearest first.</p>
+                  <p className="muted small" style={{ margin: "4px 0 0" }}>Our rider picks it up and drops it at the NGO. NGOs that take {d.category.name.toLowerCase()}{d.food_type === "cooked" ? " and cooked food" : ""}: those working where a disaster needs this item first, then checked ones, then nearest.</p>
                 </div>
                 {options === null ? (
                   <p className="muted">Loading NGOs…</p>
@@ -323,7 +323,13 @@ export default function DonationDetail() {
                             <span className="chip wait">{o.location_approx ? "distance not known" : `${o.distance_km} km`}</span>
                             <span className="chip wait">{o.items_30d} donations / 30 days</span>
                             {o.found_by === "web_search" && <span className="chip wait" title="Found by web search: call them first">From the web</span>}
+                            {o.found_by === "openstreetmap" && <span className="chip wait" title="Found on OpenStreetMap: call them first">From the map</span>}
+                            {o.phone_confirmed && o.ban_checked
+                              ? <span className="chip ok">✓ Checked</span>
+                              : <span className="chip" style={{ background: "var(--warn-bg)", color: "var(--warn)" }}>{!o.ban_checked ? "Banned lists not checked" : "Not called yet"}</span>}
                           </span>
+                          {o.disaster && <span className="small" style={{ display: "block", marginTop: 4, color: "var(--urgent)", fontWeight: 700 }}>{o.disaster}</span>}
+                          {o.works_text && <span className="small" style={{ display: "block", marginTop: 2, color: "var(--info)" }}>{o.works_text}</span>}
                           {o.source_url && <a className="small" href={o.source_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Where we found it</a>}
                         </span>
                       </label>

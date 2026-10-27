@@ -165,7 +165,23 @@ NGO accounts and no verification step (call an NGO found on the web before the f
 | POST | `/admin/ngos` | admin | Add one you know: name, location_id, address, lat, lng, phone?, website?, about?, takes_cooked_food, category_ids (empty = takes everything) |
 | PATCH | `/admin/ngos/{id}` | admin | Edit; moving the pin clears `location_approx`; `is_active: false` hides it |
 | POST | `/admin/ngos/search` | admin | `{ "location_id", "category_id"? }`: web search for NGOs in that place's city (1–3 min, uses AI credit), saved and returned |
-| GET | `/admin/donations/{id}/ngo-options` | admin | NGOs that take this donation, same area / city first, then nearest |
+| POST | `/admin/ngos/osm` | admin | `{ "location_id" }`: NGO, charity and social-facility offices on OpenStreetMap around that city (free, Overpass API); new ones added (`found_by: openstreetmap`), NGOs known only by city get their pin |
+| GET | `/admin/donations/{id}/ngo-options` | admin | NGOs that take this donation (order below) |
+
+**Checks.** PATCH (or POST) with `phone_confirmed: true` (called: they take donated items and the ticked categories)
+and `ban_checked: true` (not on a banned-organisation list: NACTA, provincial Home Departments) stores today's date in
+`phone_confirmed_at` / `ban_checked_at`; `false` clears it. `registration` is free text (e.g. "PCP certified").
+
+**Who works where (OCHA 3W).** Each NGO is matched by name to the organisations in the stored 3W (HDX HAPI
+operational presence; full names and acronyms, e.g. "Norwegian Refugee Council" = "NRC"). NGO output has `works`
+(`[{place, sectors}]`) and `works_text` ("Works on Shelter, WASH in Dadu (OCHA 3W, Dec 2025)").
+
+**Order of NGO options for a donation:** NGOs in another province last; then NGOs that work where an active disaster
+needs this item (3W presence in the alert's districts, or an office there; the alert of the appeal the donation
+answers, else every alert of the last 30 days whose recommended items include its category: `disaster` says which);
+then NGOs with both checks; then same area, region, city, province; then distance. Each option carries
+`works_text`, `disaster`, `phone_confirmed`, `ban_checked` and `registration`. An alert's `ngos` lists NGOs with an
+office in its cities or 3W presence in its districts, with `why`, `active_here` and `checked`, active ones first.
 
 **Web search.** The AI (OpenAI or Claude) searches the web for NGOs with an office in the city that accept donated
 goods and returns name, address, phone, website, what they take (our 12 categories), cooked food yes/no, one line

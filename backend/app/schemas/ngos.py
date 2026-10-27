@@ -34,6 +34,11 @@ class _NgoFields(BaseModel):
         return self
 
 
+class WorksIn(BaseModel):
+    place: str
+    sectors: list[str]
+
+
 class NgoIn(_NgoFields):
     name: str = Field(min_length=2, max_length=160)
     location_id: uuid.UUID
@@ -45,6 +50,9 @@ class NgoIn(_NgoFields):
     about: Optional[str] = Field(default=None, max_length=1000)
     takes_cooked_food: bool = False
     category_ids: list[int] = Field(default_factory=list, description="Empty = takes every category")
+    registration: Optional[str] = Field(default=None, max_length=160)
+    phone_confirmed: bool = False
+    ban_checked: bool = False
 
 
 class NgoUpdate(_NgoFields):
@@ -59,6 +67,9 @@ class NgoUpdate(_NgoFields):
     takes_cooked_food: Optional[bool] = None
     is_active: Optional[bool] = None
     category_ids: Optional[list[int]] = None
+    registration: Optional[str] = Field(default=None, max_length=160)
+    phone_confirmed: Optional[bool] = None   # true = called today and they take our items; false = clear it
+    ban_checked: Optional[bool] = None       # true = checked today: not on a banned-organisation list
 
 
 class NgoOut(BaseModel):
@@ -81,6 +92,20 @@ class NgoOut(BaseModel):
     items_30d: int                  # donations sent here in the last 30 days
     created_at: datetime
     place_warning: Optional[str] = None   # the pin is far from its city (wrong address found?)
+    works: list[WorksIn] = []              # where it works by sector, from OCHA 3W (matched by name)
+    works_text: Optional[str] = None       # "Works on WASH, Shelter in Dadu (OCHA 3W, Dec 2025)"
+    phone_confirmed_at: Optional[datetime] = None
+    ban_checked_at: Optional[datetime] = None
+    registration: Optional[str] = None
+
+
+class NgoOsmOut(BaseModel):
+    place: str
+    found: int
+    added: int
+    located: int        # NGOs we knew whose office was put on the map
+    status: str
+    ngos: list[NgoOut]
 
 
 class NgoSearchIn(BaseModel):

@@ -158,7 +158,7 @@ def sync_un(db: Session, un: dict, source_id: int, places: list[Place]) -> list[
         if loc is None:
             continue
         db.add(NeedIndicator(location_id=loc.id, indicator="orgs_present", value=r["orgs"], source_id=source_id,
-                             period_end=r["period_end"], meta={"sectors": r["sectors"]}))
+                             period_end=r["period_end"], meta={"sectors": r["sectors"], "names": r.get("names") or {}}))
         n += 1
     parts.append(f"3W {n} places" if n else "3W: none for Pakistan")
     n = 0
