@@ -271,7 +271,8 @@ def recompute(db: Session) -> int:
         if ind.indicator == "ipc_phase3plus_share":
             people = (ind.meta or {}).get("people")
             count = f" (about {int(people):,} people)" if people else ""
-            r = {"why": f"{ind.value:.0%} of people do not have enough food{count}. This is the IPC 'crisis' level or worse.",
+            r = {"why": f"{ind.value:.0%} of people in this district do not have enough food{count}. This is the IPC "
+                        "'crisis' level or worse. IPC counts the whole district, not only the main town.",
                  "source": "IPC food security data (via HDX)", "date": when}
             add(ind.location_id, "food", score_ipc(ind.value), r)
             add(ind.location_id, "grocery_ration", score_ipc(ind.value), r)
