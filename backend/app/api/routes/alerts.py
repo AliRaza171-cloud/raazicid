@@ -264,7 +264,8 @@ class SourceOut(BaseModel):
     can_run: bool
 
 
-RUNNABLE = {SourceKind.gdacs, SourceKind.hdx_hapi, SourceKind.web_search, SourceKind.reliefweb, SourceKind.ai_needs}
+RUNNABLE = {SourceKind.gdacs, SourceKind.hdx_hapi, SourceKind.web_search, SourceKind.reliefweb, SourceKind.ai_needs,
+            SourceKind.ngo_finder}
 
 
 def can_run(kind: SourceKind) -> bool:

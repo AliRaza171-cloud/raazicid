@@ -55,14 +55,33 @@ export default function NeedsMap() {
     api<Deprivation>(here.id ? `/admin/deprivation?parent_id=${here.id}` : "/admin/deprivation").then(setDep).catch(() => setDep(null));
   }, [here.id]);
   useEffect(loadDep, [loadDep]);
+  const loadPoints = useCallback(() => { api<Ngo[]>("/admin/ngos").then(setPoints).catch(() => undefined); }, []);
   useEffect(() => {
     api<Category[]>("/categories").then(setCats).catch(() => undefined);
     // reload NGOs when you come back to this tab (e.g. after a web search on the NGOs page)
-    const loadPoints = () => api<Ngo[]>("/admin/ngos").then(setPoints).catch(() => undefined);
     loadPoints();
     window.addEventListener("focus", loadPoints);
     return () => window.removeEventListener("focus", loadPoints);
-  }, []);
+  }, [loadPoints]);
+
+  // Find NGOs for places in need that have none: OpenStreetMap, OCHA 3W, then web search (backend "NGO finder")
+  const [filling, setFilling] = useState<string | null>(null);   // place id being filled, or "all"
+  const [fillMsg, setFillMsg] = useState<string | null>(null);
+  const fillGaps = async (locationId: string | null, key: string) => {
+    setFilling(key);
+    setFillMsg(null);
+    setError(null);
+    try {
+      const r = await api<{ ok: boolean; status: string }>("/admin/ngos/fill-gaps", { method: "POST", body: JSON.stringify({ location_id: locationId, use_ai: true }) });
+      if (r.ok) setFillMsg(r.status);
+      else setError(r.status);
+      loadPoints();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setFilling(null);
+    }
+  };
 
   const clearFocus = () => {
     setPicked(null);
@@ -339,14 +358,24 @@ export default function NeedsMap() {
         )}
 
         <section className="card" style={{ padding: 0 }}>
-          <div style={{ padding: "16px 18px 0" }}>
-            <h2 style={{ margin: 0, fontSize: 16 }}>
-              Coverage gaps{categoryId !== null ? ` for ${cats.find((c) => c.id === categoryId)?.name.toLowerCase()}` : ""} in {here.name}
-            </h2>
-            <p className="muted small" style={{ margin: "2px 0 0" }}>
-              High or urgent need, but no NGO we know that takes the item within {GAP_KM.city} km (10 km for an area). Search the web for NGOs there, so donations can reach them.
-            </p>
+          <div style={{ padding: "16px 18px 0", display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <div style={{ marginRight: "auto", maxWidth: 720 }}>
+              <h2 style={{ margin: 0, fontSize: 16 }}>
+                Coverage gaps{categoryId !== null ? ` for ${cats.find((c) => c.id === categoryId)?.name.toLowerCase()}` : ""} in {here.name}
+              </h2>
+              <p className="muted small" style={{ margin: "2px 0 0" }}>
+                High or urgent need, but no NGO we know that takes the item within {GAP_KM.city} km (10 km for an area).
+                The NGO finder looks for NGOs there, highest need first: OpenStreetMap offices and OCHA 3W organisations working
+                on that need (free), then a web search where those found nothing. It also runs by itself once a day.
+              </p>
+            </div>
+            {gaps.length > 0 && (
+              <button className="btn small" disabled={filling !== null} onClick={() => fillGaps(here.id, "all")}>
+                {filling === "all" ? "Finding NGOs… (up to a few minutes)" : `Find NGOs for these places`}
+              </button>
+            )}
           </div>
+          {fillMsg && <div className="flash ok" role="status" style={{ margin: "10px 18px 0" }}>{fillMsg}</div>}
           {gaps.length === 0 ? (
             <p className="muted" style={{ padding: "10px 18px 16px", margin: 0 }}>
               {data ? "No gaps: every place in high or urgent need has an NGO nearby." : "Loading…"}
@@ -364,7 +393,10 @@ export default function NeedsMap() {
                       {g.row.lat !== null && (
                         <button className="btn ghost small" onClick={() => { setView("map"); setPicked(null); setFocusPoint(null); setFocusRow(g.row.id); }}>Show on map</button>
                       )}{" "}
-                      {g.row.has_children && <button className="btn ghost small" onClick={() => open(g.row)}>Look inside</button>}
+                      {g.row.has_children && <button className="btn ghost small" onClick={() => open(g.row)}>Look inside</button>}{" "}
+                      <button className="btn ghost small" disabled={filling !== null} onClick={() => fillGaps(g.row.id, g.row.id)}>
+                        {filling === g.row.id ? "Finding…" : "Find NGOs here"}
+                      </button>
                     </td>
                   </tr>
                 ))}

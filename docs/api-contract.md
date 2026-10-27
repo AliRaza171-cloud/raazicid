@@ -168,6 +168,21 @@ NGO accounts and no verification step (call an NGO found on the web before the f
 | POST | `/admin/ngos/osm` | admin | `{ "location_id" }`: NGO, charity and social-facility offices on OpenStreetMap around that city (free, Overpass API); new ones added (`found_by: openstreetmap`), NGOs known only by city get their pin |
 | GET | `/admin/donations/{id}/ngo-options` | admin | NGOs that take this donation (order below) |
 
+| POST | `/admin/ngos/fill-gaps` | admin | `{ "location_id"?, "use_ai": true }`: the NGO finder for places in need (below); returns `{ok, status}` |
+
+**NGO finder for places in need** (data source `ngo_finder`, daily by itself: `NGO_FINDER_EVERY_HOURS`, default 24).
+A gap is a place (district, city or area) with high or urgent need for an item and no active NGO that takes it within
+30 km (10 km for an area) or filed inside it. For each gap's city, highest need first (at most 8 per run):
+1. **OpenStreetMap** offices around the city are added (`found_by: openstreetmap`); NGOs known only by city get their pin.
+2. **OCHA 3W** organisations working in that district on a sector that serves the item (shelter → blankets, household,
+   winter; WASH → hygiene; food → food, rations; education → school supplies, books…) are added under the city with
+   those categories, `found_by: ocha_3w`, approximate location (3W has no addresses). UN agencies and government
+   bodies are left out.
+3. If the city still has a gap, a **web search** for NGOs there that take the most-needed item (AI credit; at most
+   `NGO_AI_SEARCHES_PER_RUN`, default 2; skipped with `use_ai: false` or no AI key).
+Districts from HDX without a map centre get one from OpenStreetMap Nominatim the first time. The status says how many
+each source added and which places still have no NGO. Every NGO found still needs the admin's checks.
+
 **Checks.** PATCH (or POST) with `phone_confirmed: true` (called: they take donated items and the ticked categories)
 and `ban_checked: true` (not on a banned-organisation list: NACTA, provincial Home Departments) stores today's date in
 `phone_confirmed_at` / `ban_checked_at`; `false` clears it. `registration` is free text (e.g. "PCP certified").

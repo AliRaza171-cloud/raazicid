@@ -156,6 +156,10 @@ Migration 0004 (run `alembic upgrade head` once more) adds the NGO checks. **Fin
 NGO and charity offices from the free map; NGOs are matched to OCHA's who-works-where (3W) data, and during a
 disaster the NGOs working in the affected districts are suggested first. Tick "confirmed by phone" and "not on a
 banned list" on each NGO before sending donations.
+The **NGO finder** fills the coverage gaps by itself once a day (and from **Find NGOs for these places** on Needs by
+area): for the places in high or urgent need without an NGO nearby, highest need first, it adds offices from
+OpenStreetMap, organisations OCHA 3W lists as working on that need there, and, where both find nothing, up to two web
+searches per run. Settings in `backend/.env`: `NGO_FINDER_EVERY_HOURS=24`, `NGO_AI_SEARCHES_PER_RUN=2` (0 = free sources only).
 The AI then reads every library report for unmet needs; they show up in Needs by area with the report's quote and page.
 
 UN data from HDX HAPI (no extra setup, it comes with the daily HDX fetch): OCHA 3W (who works where), people in

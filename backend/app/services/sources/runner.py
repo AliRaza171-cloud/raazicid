@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.models import DisasterAlert, Source
 from app.models.enums import AlertStatus, SourceKind
 from app.services import needs
-from app.services.sources import ai_needs, gdacs, hdx, reliefweb, webscan
+from app.services.sources import ai_needs, gdacs, hdx, ngo_gaps, reliefweb, webscan
 
 log = logging.getLogger("raazicid.sources")
 
@@ -37,8 +37,9 @@ def _reliefweb(db: Session, source_id: int) -> str:
 
 
 RUNNERS = {SourceKind.gdacs: _gdacs, SourceKind.hdx_hapi: _hdx, SourceKind.web_search: _webscan,
-           SourceKind.reliefweb: _reliefweb, SourceKind.ai_needs: ai_needs.run}
-NAMES = {SourceKind.ai_needs: "AI web scan for current needs"}
+           SourceKind.reliefweb: _reliefweb, SourceKind.ai_needs: ai_needs.run, SourceKind.ngo_finder: ngo_gaps.run}
+NAMES = {SourceKind.ai_needs: "AI web scan for current needs",
+         SourceKind.ngo_finder: "NGO finder for places in need (OpenStreetMap, OCHA 3W, web search)"}
 
 
 def ensure_source(db: Session, kind: SourceKind) -> Source:

@@ -69,6 +69,10 @@ def start():
     if settings.AI_NEEDS_EVERY_DAYS > 0 and llm.available():   # AI web scan for current needs (all Pakistan)
         every = timedelta(days=settings.AI_NEEDS_EVERY_DAYS)
         s.add_job(_job(SourceKind.ai_needs, every), "interval", days=settings.AI_NEEDS_EVERY_DAYS, id="ai_needs")
+    if settings.NGO_FINDER_EVERY_HOURS > 0:   # NGOs where places in need have none (free sources first)
+        every = timedelta(hours=settings.NGO_FINDER_EVERY_HOURS)
+        s.add_job(_job(SourceKind.ngo_finder, every), "interval", hours=settings.NGO_FINDER_EVERY_HOURS,
+                  next_run_time=now + timedelta(minutes=5), id="ngo_finder")
     if settings.WEB_SCAN_EVERY_HOURS > 0 and llm.available():
         every = timedelta(hours=settings.WEB_SCAN_EVERY_HOURS)
         s.add_job(_job(SourceKind.web_search, every), "interval", hours=settings.WEB_SCAN_EVERY_HOURS, id="webscan")

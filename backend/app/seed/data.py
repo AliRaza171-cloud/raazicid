@@ -26,6 +26,7 @@ SOURCES = [
     (6, "web_search", "Claude web search", None),
     (7, "upload", "Manual upload", None),
     (8, "ai_needs", "AI web scan for current needs", None),
+    (9, "ngo_finder", "NGO finder for places in need (OpenStreetMap, OCHA 3W, web search)", 1440),
 ]
 
 # Province -> cities. Rural districts from IPC/HDX (e.g. Tharparkar, Kech) are added in Phase 6

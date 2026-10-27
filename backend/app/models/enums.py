@@ -84,6 +84,7 @@ class SourceKind(str, Enum):
     web_search = "web_search"
     upload = "upload"
     ai_needs = "ai_needs"     # AI web scan for current needs (Phase 6)
+    ngo_finder = "ngo_finder" # finds NGOs where places in need have none (OpenStreetMap, OCHA 3W, web search)
 
 
 class ReportStatus(str, Enum):

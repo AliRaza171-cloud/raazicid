@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -13,10 +14,12 @@ from app.core.deps import require_roles
 from app.core.errors import api_error
 from app.db.session import get_db
 from app.models import Category, Location, Ngo, User
-from app.models.enums import Role
+from app.models.enums import Role, SourceKind
 from app.schemas.ngos import NgoIn, NgoOsmOut, NgoOut, NgoSearchIn, NgoSearchOut, NgoUpdate
 from app.services import llm, ngo_finder, ngo_sources
-from app.services.locations import ancestor_ids, descendant_ids
+from app.services.sources import ngo_gaps
+from app.services.sources.runner import run_source
+from app.services.locations import descendant_ids
 from app.services.ngos import ngo_out, search_place
 
 router = APIRouter(prefix="/admin/ngos", tags=["admin: NGOs"])
@@ -127,11 +130,10 @@ def from_openstreetmap(body: NgoSearchIn, _: User = Depends(admin_only), db: Ses
     place = search_place(db, body.location_id)
     if place is None:
         raise api_error(404, "location_not_found", "Place not found")
-    centre = place if place.lat is not None else next(
-        (l for l in (db.get(Location, i) for i in ancestor_ids(db, place.id)) if l is not None and l.lat is not None), None)
+    centre = ngo_gaps.ensure_centre(db, place)   # districts from HDX get their map centre from OpenStreetMap once
     if centre is None:
         raise api_error(422, "no_map_centre", f"We have no map position for {place.name}")
-    place_id, place_name, lat, lng, radius = place.id, place.name, centre.lat, centre.lng, ngo_sources.radius_for(place.level)
+    place_id, place_name, (lat, lng), radius = place.id, place.name, centre, ngo_sources.radius_for(place.level)
     db.commit()   # no transaction open while waiting for Overpass
     offices = ngo_sources.osm_offices(lat, lng, radius)
     inside = descendant_ids(db, place_id)
@@ -163,3 +165,18 @@ def from_openstreetmap(body: NgoSearchIn, _: User = Depends(admin_only), db: Ses
     ngos = db.scalars(select(Ngo).where(Ngo.location_id.in_(inside), Ngo.is_active.is_(True)).order_by(Ngo.name))
     return NgoOsmOut(place=place_name, found=len(offices), added=added, located=located, status=status,
                      ngos=[ngo_out(db, n, index) for n in ngos])
+
+
+class FillGapsIn(BaseModel):
+    location_id: Optional[uuid.UUID] = None   # only places in need inside this one (all Pakistan if empty)
+    use_ai: bool = True                       # also web search (AI credit) where the free sources found nothing
+
+
+@router.post("/fill-gaps")
+def fill_gaps(body: FillGapsIn, _: User = Depends(admin_only), db: Session = Depends(get_db)):
+    """Find NGOs for the places in high or urgent need that have none nearby: OpenStreetMap, then OCHA 3W, then a web
+    search (at most NGO_AI_SEARCHES_PER_RUN). Takes from seconds to a few minutes."""
+    if body.location_id and db.get(Location, body.location_id) is None:
+        raise api_error(404, "location_not_found", "Place not found")
+    ok, status_line = run_source(db, SourceKind.ngo_finder, {"location_id": body.location_id, "use_ai": body.use_ai})
+    return {"ok": ok, "status": status_line}

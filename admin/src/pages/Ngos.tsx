@@ -152,7 +152,7 @@ export default function Ngos() {
                         <div className="muted small" style={{ marginTop: 3 }}>{n.items_30d} donations / 30 days</div>
                       </td>
                       <td className="small">
-                        {n.found_by === "web_search" ? "Web search" : n.found_by === "openstreetmap" ? "OpenStreetMap" : "Added by admin"}
+                        {n.found_by === "web_search" ? "Web search" : n.found_by === "openstreetmap" ? "OpenStreetMap" : n.found_by === "ocha_3w" ? "OCHA 3W" : "Added by admin"}
                         {n.source_url && <div><a href={n.source_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Source</a></div>}
                       </td>
                     </tr>
@@ -251,6 +251,12 @@ function NgoPanel({ editing, cats, onClose, onSaved }: {
         <div className="flash" style={{ background: "var(--info-bg)", color: "var(--info)" }}>
           Found on OpenStreetMap{start.source_url ? <> (<a href={start.source_url} target="_blank" rel="noreferrer">map entry</a>)</> : ""}.
           We do not know what they take yet: call them and tick the items below.
+        </div>
+      )}
+      {start?.found_by === "ocha_3w" && (
+        <div className="flash" style={{ background: "var(--info-bg)", color: "var(--info)" }}>
+          Found in OCHA's who-works-where (3W) data for a place in need. 3W does not give office addresses: search the web
+          or call them to find their office in this city, and ask if they take donated items.
         </div>
       )}
       {start?.location_approx && (
