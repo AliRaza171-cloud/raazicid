@@ -486,8 +486,15 @@ type NeedNgo = {
 
 const FOUND_BY: Record<string, string> = { web_search: "Web search", openstreetmap: "OpenStreetMap", ocha_3w: "OCHA 3W", admin: "Added by admin" };
 
+const addLink = (pl: { place_id: string; path: string[]; lat: number | null; lng: number | null }, categoryId: number) => {
+  const q = new URLSearchParams({ add: pl.place_id, path: pl.path.join("|"), cat: String(categoryId) });
+  if (pl.lat !== null && pl.lng !== null) { q.set("lat", String(pl.lat)); q.set("lng", String(pl.lng)); }
+  return `/ngos?${q}`;
+};
+
 type NeedPlace = {
-  place_id: string; place: string; level: number; has_position: boolean; ngos: NeedNgo[]; more: number;
+  place_id: string; place: string; path: string[]; level: number; has_position: boolean; lat: number | null; lng: number | null;
+  ngos: NeedNgo[]; more: number; works_here: { id: string; name: string; city: string; phone: string | null }[];
   fallback: { town_id: string; town: string; km: number; ngos: NeedNgo[]; more: number } | null;
 };
 
@@ -647,11 +654,22 @@ function NeedDetail({ picked, onFind, finding, onClose }: { picked: Picked; onFi
                         <button className="btn ghost small" disabled={finding} onClick={() => onFind(pl.place_id)}>
                           {own > 0 ? "Find more" : `Find NGOs in ${pl.place}`}
                         </button>
+                        <Link className="btn ghost small" to={addLink(pl, picked.need.category_id)}>+ Add one you know</Link>
                       </div>
                     </td>
                   </tr>
                   {pl.ngos.map((n) => <NgoRow key={n.id} n={n} cell={cell} />)}
                   {fb && fb.ngos.map((n) => <NgoRow key={`fb-${n.id}`} n={n} cell={cell} far />)}
+                  {pl.works_here.length > 0 && (
+                    <tr>
+                      <td colSpan={6} className="small" style={{ ...cell, color: "var(--ink-2)" }}>
+                        <strong>Also work in {pl.place} (OCHA 3W), but their office here is not known:</strong>{" "}
+                        {pl.works_here.map((w, i) => (
+                          <span key={w.id}>{i > 0 ? ", " : ""}{w.name} <span className="muted">({w.city}{w.phone ? `, ${w.phone}` : ""})</span></span>
+                        ))}. Call them to ask where their {pl.place} team takes donations.
+                      </td>
+                    </tr>
+                  )}
                   {fb && fb.more > 0 && (
                     <tr><td colSpan={6} className="muted small" style={cell}>{fb.more} more NGO{fb.more === 1 ? "" : "s"} in {fb.town}: see the NGOs page.</td></tr>
                   )}

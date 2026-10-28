@@ -7,6 +7,7 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models import Appeal, Category, DisasterAlert, Donation, Location, NeedLevel, Ngo
 from app.models.enums import AlertStatus, LocationLevel
 from app.models.enums import DonationStatus as S
@@ -14,7 +15,7 @@ from app.schemas.donations import CategoryRef, NgoOption, NgoRef
 from app.schemas.ngos import NgoOut, WorksIn
 from app.services.geo import distance_km
 from app.services.locations import ancestor_ids, coords_problem, descendant_ids, location_path
-from app.services.ngo_sources import Presence, Works, load_index, takes_goods, works_for
+from app.services.ngo_sources import Presence, Works, load_index, same_org, takes_goods, works_for
 from app.services.relief import alert_slugs
 
 ALERT_DAYS = 30
@@ -260,21 +261,43 @@ def need_places(db: Session, location_id: uuid.UUID, category_id: int, max_place
         places[loc.id] = 0
     cands = ngos_taking(db, category_id)
     towns = towns_with_ngos(db, cands)
+    chosen = list(places.items())[:max_places]
+    missing = [pid for pid, _ in chosen if _centre(db, pid) is None][:2] if settings.MAP_PLACES_ON_VIEW else []
+    if missing:   # districts added from HDX have no map position yet: look up a couple per visit (OpenStreetMap)
+        from app.services.sources.ngo_gaps import ensure_centre
+        for pid in missing:
+            ensure_centre(db, db.get(Location, pid))
     out = []
-    for pid, level in list(places.items())[:max_places]:
-        ngos = _for_one(db, pid, cands)
+    for pid, level in chosen:
+        found = _for_one(db, pid, cands)
+        own = _distinct([x for x in found if x["reachable"]])
+        # Working in the place by OCHA 3W, but their office there is not known (it is filed in another city)
+        elsewhere = [x for x in _distinct([x for x in found if not x["reachable"]])
+                     if not any(same_org(x["name"], o["name"]) for o in own)]
         fallback = None
-        if not any(x["reachable"] for x in ngos):
+        if not own:
             hit = nearest_town(db, pid, towns)
             if hit is not None:
                 tid, km = hit
                 centre = _centre(db, pid)
                 items = [_need_item(db, n, w, None if n.location_approx else round(distance_km(centre[0], centre[1], n.lat, n.lng), 1),
                                     False, False) for n, w in towns[tid]]
-                items.sort(key=_need_order)
+                items = _distinct(sorted(items, key=_need_order))
                 fallback = {"town_id": str(tid), "town": location_path(db, tid)[-1], "km": round(km),
                             "ngos": items[:per_place], "more": max(0, len(items) - per_place)}
-        out.append({"place_id": str(pid), "place": location_path(db, pid)[-1], "level": level,
-                    "has_position": _centre(db, pid) is not None,
-                    "ngos": ngos[:per_place], "more": max(0, len(ngos) - per_place), "fallback": fallback})
+        centre = _centre(db, pid)
+        out.append({"place_id": str(pid), "place": location_path(db, pid)[-1], "path": location_path(db, pid), "level": level,
+                    "has_position": centre is not None, "lat": centre[0] if centre else None, "lng": centre[1] if centre else None,
+                    "ngos": own[:per_place], "more": max(0, len(own) - per_place),
+                    "works_here": [{"id": x["id"], "name": x["name"], "city": x["city"], "phone": x["phone"]} for x in elsewhere[:6]],
+                    "fallback": fallback})
+    return out
+
+
+def _distinct(items: list[dict]) -> list[dict]:
+    """One row per organisation: the same NGO saved in several cities (from 3W) shows once, the best-placed copy."""
+    out: list[dict] = []
+    for x in items:
+        if not any(same_org(x["name"], o["name"]) for o in out):
+            out.append(x)
     return out

@@ -12,6 +12,7 @@ os.environ["OPENAI_API_KEY"] = ""
 os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["ENABLE_EMBEDDINGS"] = "false"
 os.environ["FIND_NGOS_FOR_ALERTS"] = "false"   # no OpenStreetMap / web lookups after a test adds an alert
+os.environ["MAP_PLACES_ON_VIEW"] = "false"     # no OpenStreetMap lookups when a test opens Needs by area
 
 import pytest
 from fastapi.testclient import TestClient

@@ -1,11 +1,21 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import LocationSelect from "../components/LocationSelect";
 import { PageHeader } from "../components/Layout";
 import PinPicker, { type Centre } from "../components/PinPicker";
 import { api, type Category, type Ngo, type NgoOsm, type NgoSearch } from "../lib/api";
 import { date } from "../lib/format";
 
-type Editing = { mode: "new" } | { mode: "edit"; ngo: Ngo };
+type Preset = { id: string; path: string[]; lat: number | null; lng: number | null; categoryId: number | null };
+type Editing = { mode: "new"; place?: Preset } | { mode: "edit"; ngo: Ngo };
+
+/** "Add an NGO in Dadu" from Needs by area opens the form with the place (and item) filled in. */
+function presetFrom(params: URLSearchParams): Preset | undefined {
+  const id = params.get("add");
+  if (!id) return undefined;
+  const num = (k: string) => (params.get(k) ? Number(params.get(k)) : null);
+  return { id, path: (params.get("path") ?? "").split("|").filter(Boolean), lat: num("lat"), lng: num("lng"), categoryId: num("cat") };
+}
 
 /** NGOs, charities and welfare trusts where our riders drop donations. Found by web search or added by hand. */
 export default function Ngos() {
@@ -15,7 +25,9 @@ export default function Ngos() {
   const [placeName, setPlaceName] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [showHidden, setShowHidden] = useState(false);
-  const [editing, setEditing] = useState<Editing | null>(null);
+  const [params] = useSearchParams();
+  const preset = presetFrom(params);
+  const [editing, setEditing] = useState<Editing | null>(preset ? { mode: "new", place: preset } : null);
   const [searchCat, setSearchCat] = useState("");
   const [searching, setSearching] = useState(false);
   const [mapping, setMapping] = useState(false);
@@ -179,21 +191,23 @@ function NgoPanel({ editing, cats, onClose, onSaved }: {
   onSaved: (n: Ngo, created: boolean) => void;
 }) {
   const start = editing.mode === "edit" ? editing.ngo : null;
+  const preset = editing.mode === "new" ? editing.place : undefined;
   const [name, setName] = useState(start?.name ?? "");
-  const [locationId, setLocationId] = useState<string | null>(start?.location_id ?? null);
-  const [changeLocation, setChangeLocation] = useState(!start);
+  const [locationId, setLocationId] = useState<string | null>(start?.location_id ?? preset?.id ?? null);
+  const [changeLocation, setChangeLocation] = useState(!start && !preset);
   const [address, setAddress] = useState(start?.address ?? "");
   const [coords, setCoords] = useState(start ? `${start.lat}, ${start.lng}` : "");
   const [phone, setPhone] = useState(start?.phone ?? "");
   const [website, setWebsite] = useState(start?.website ?? "");
   const [about, setAbout] = useState(start?.about ?? "");
   const [cooked, setCooked] = useState(start?.takes_cooked_food ?? false);
-  const [accepts, setAccepts] = useState<number[]>(start?.categories.map((c) => c.id) ?? []);
+  const [accepts, setAccepts] = useState<number[]>(start?.categories.map((c) => c.id) ?? (preset?.categoryId ? [preset.categoryId] : []));
   const [active, setActive] = useState(start?.is_active ?? true);
   const [phoneOk, setPhoneOk] = useState(!!start?.phone_confirmed_at);
   const [banOk, setBanOk] = useState(!!start?.ban_checked_at);
   const [registration, setRegistration] = useState(start?.registration ?? "");
-  const [centre, setCentre] = useState<Centre | null>(start ? { name: start.location_path.slice(-1)[0] ?? "", lat: start.lat, lng: start.lng } : null);
+  const [centre, setCentre] = useState<Centre | null>(start ? { name: start.location_path.slice(-1)[0] ?? "", lat: start.lat, lng: start.lng }
+    : preset && preset.lat !== null && preset.lng !== null ? { name: preset.path.slice(-1)[0] ?? "", lat: preset.lat, lng: preset.lng } : null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -230,7 +244,7 @@ function NgoPanel({ editing, cats, onClose, onSaved }: {
   return (
     <aside className="card" style={{ flex: "1 1 360px", display: "flex", flexDirection: "column", gap: 14 }} aria-label="NGO details">
       <div style={{ display: "flex", alignItems: "center" }}>
-        <h2 style={{ margin: 0, fontSize: 18, marginRight: "auto" }}>{start ? start.name : "Add an NGO"}</h2>
+        <h2 style={{ margin: 0, fontSize: 18, marginRight: "auto" }}>{start ? start.name : preset ? `Add an NGO in ${preset.path.slice(-1)[0] ?? "this place"}` : "Add an NGO"}</h2>
         <button onClick={onClose} aria-label="Close" style={{ border: 0, background: "none", fontSize: 22, cursor: "pointer" }}>×</button>
       </div>
       {start?.found_by === "web_search" && (
@@ -279,7 +293,7 @@ function NgoPanel({ editing, cats, onClose, onSaved }: {
             }} />
           ) : (
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <span style={{ flex: 1 }}>{start?.location_path.join(" › ")}</span>
+              <span style={{ flex: 1 }}>{(start?.location_path ?? preset?.path ?? []).join(" › ")}</span>
               <button type="button" className="btn ghost small" onClick={() => { setChangeLocation(true); setLocationId(null); }}>Change</button>
             </div>
           )}

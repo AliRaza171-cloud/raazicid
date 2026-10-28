@@ -153,7 +153,9 @@ def _from_3w(db: Session, location_id: Any, slug: str, city: Location, centre: t
               if (db.get(Location, i) or Location()).level != LocationLevel.province]
     rows = list(db.scalars(select(NeedIndicator).where(NeedIndicator.indicator == "orgs_present",
                                                        NeedIndicator.location_id.in_(places))))
-    known = list(db.scalars(select(Ngo).where(Ngo.location_id.in_(descendant_ids(db, city.id)))))
+    # Any copy anywhere counts: 3W lists the same organisation in many districts, and works_for() already shows
+    # it as working here. Saving it again in every city made the same NGO appear many times.
+    known = list(db.scalars(select(Ngo)))
     cats = {c.slug: c for c in db.scalars(select(Category))}
     added = 0
     for ind in rows:

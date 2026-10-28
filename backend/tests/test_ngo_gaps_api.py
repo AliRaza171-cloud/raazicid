@@ -111,6 +111,7 @@ def test_province_need_shows_ngos_per_place_and_searches_each_place(client, db, 
         fb = rows["Sukkur"]["fallback"]
         assert rows["Sukkur"]["ngos"] == [] and fb["town"] == "Larkana" and 40 < fb["km"] < 90
         assert [n["name"] for n in fb["ngos"]] == ["Larkana Blanket Bank"]
+        assert rows["Sukkur"]["path"][-1] == "Sukkur" and rows["Sukkur"]["works_here"] == []
 
         r = client.post(f"{API}/admin/ngos/fill-gaps", headers=admin_h, json={**params, "use_ai": False}).json()
         assert r["ok"] and "Sukkur (+1)" in r["status"], r
