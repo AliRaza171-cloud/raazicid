@@ -7,14 +7,14 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Appeal, Category, DisasterAlert, Donation, Location, Ngo
+from app.models import Appeal, Category, DisasterAlert, Donation, Location, NeedLevel, Ngo
 from app.models.enums import AlertStatus, LocationLevel
 from app.models.enums import DonationStatus as S
 from app.schemas.donations import CategoryRef, NgoOption, NgoRef
 from app.schemas.ngos import NgoOut, WorksIn
 from app.services.geo import distance_km
 from app.services.locations import ancestor_ids, coords_problem, descendant_ids, location_path
-from app.services.ngo_sources import Presence, load_index, works_for
+from app.services.ngo_sources import Presence, Works, load_index, takes_goods, works_for
 from app.services.relief import alert_slugs
 
 ALERT_DAYS = 30
@@ -147,37 +147,92 @@ def nearest_food_ngo_km(db: Session, lat: float, lng: float) -> Optional[float]:
     return best
 
 
-def ngos_for_need(db: Session, location_id: uuid.UUID, category_id: int, limit: int = 15) -> list[dict]:
-    """NGOs to drop this item at for this place: offices in the place or within 30 km that take the item, and NGOs
-    OCHA 3W says work there. Order: reachable offices first, then working there (3W), then those that list the item
-    (not just "everything"), then checked ones, then nearest."""
-    loc = db.get(Location, location_id)
-    if loc is None:
-        return []
-    inside = set(descendant_ids(db, location_id))
-    chain = [db.get(Location, i) for i in ancestor_ids(db, location_id)]
-    here = inside | {l.id for l in chain if l is not None and l.level != LocationLevel.province}
-    centre = next(((l.lat, l.lng) for l in chain if l is not None and l.lat is not None and l.level != LocationLevel.province), None)
+def _need_item(db: Session, n: Ngo, works: Works, dist: Optional[float], reachable: bool, active: bool) -> dict:
+    listed = bool(n.categories)
+    return {"website": n.website, "about": n.about, "registration": n.registration,
+            "takes": [c.name for c in sorted(n.categories, key=lambda c: c.id)],
+            "phone_confirmed": n.phone_confirmed_at is not None, "ban_checked": n.ban_checked_at is not None,
+            "id": str(n.id), "name": n.name, "address": n.address, "phone": n.phone,
+            "city": location_path(db, n.location_id)[-1], "distance_km": dist, "reachable": reachable,
+            "active_here": active, "works_text": works.text(), "takes_listed": listed,
+            "checked": n.phone_confirmed_at is not None and n.ban_checked_at is not None,
+            "location_approx": n.location_approx, "lat": n.lat, "lng": n.lng, "found_by": n.found_by}
+
+
+def _need_order(x: dict) -> tuple:
+    return (not x["reachable"], not x["active_here"], not x["takes_listed"], not x["checked"],
+            x["distance_km"] if x["distance_km"] is not None else 999)
+
+
+def _candidates(db: Session, category_id: int) -> list[tuple[Ngo, Works]]:
+    """Active NGOs that take this item (or everything) and can take donated goods at all."""
     index = load_index(db)
     out = []
     for n in db.scalars(select(Ngo).where(Ngo.is_active.is_(True))):
         listed = {c.id for c in n.categories}
-        if listed and category_id not in listed:
+        if (listed and category_id not in listed) or not takes_goods(n.name, n.about, n.found_by):
             continue
-        works = works_for(n.name, index)
+        out.append((n, works_for(n.name, index)))
+    return out
+
+
+def _centre(db: Session, location_id: uuid.UUID) -> Optional[tuple[float, float]]:
+    chain = [db.get(Location, i) for i in ancestor_ids(db, location_id)]
+    return next(((l.lat, l.lng) for l in chain if l is not None and l.lat is not None and l.level != LocationLevel.province), None)
+
+
+def _for_one(db: Session, location_id: uuid.UUID, cands: list[tuple[Ngo, Works]]) -> list[dict]:
+    inside = set(descendant_ids(db, location_id))
+    chain = [db.get(Location, i) for i in ancestor_ids(db, location_id)]
+    here = inside | {l.id for l in chain if l is not None and l.level != LocationLevel.province}
+    centre = _centre(db, location_id)
+    out = []
+    for n, works in cands:
         active = bool(works.location_ids & here)
         dist = None if (centre is None or n.location_approx) else round(distance_km(centre[0], centre[1], n.lat, n.lng), 1)
         reachable = n.location_id in inside or (dist is not None and dist <= 30) or (n.location_approx and n.location_id in here)
-        if not (reachable or active):
-            continue
-        out.append({"website": n.website, "about": n.about, "registration": n.registration,
-                    "takes": [c.name for c in sorted(n.categories, key=lambda c: c.id)],
-                    "phone_confirmed": n.phone_confirmed_at is not None, "ban_checked": n.ban_checked_at is not None,
-                    "id": str(n.id), "name": n.name, "address": n.address, "phone": n.phone,
-                    "city": location_path(db, n.location_id)[-1], "distance_km": dist, "reachable": reachable,
-                    "active_here": active, "works_text": works.text(), "takes_listed": bool(listed),
-                    "checked": n.phone_confirmed_at is not None and n.ban_checked_at is not None,
-                    "location_approx": n.location_approx, "lat": n.lat, "lng": n.lng, "found_by": n.found_by})
-    out.sort(key=lambda x: (not x["reachable"], not x["active_here"], not x["takes_listed"], not x["checked"],
-                            x["distance_km"] if x["distance_km"] is not None else 999))
-    return out[:limit]
+        if reachable or active:
+            out.append(_need_item(db, n, works, dist, reachable, active))
+    return sorted(out, key=_need_order)
+
+
+def ngos_for_need(db: Session, location_id: uuid.UUID, category_id: int, limit: int = 15) -> list[dict]:
+    """NGOs to drop this item at for this place: offices in the place or within 30 km that take the item, and NGOs
+    OCHA 3W says work there. Order: reachable offices first, then working there (3W), then those that list the item
+    (not just "everything"), then checked ones, then nearest."""
+    if db.get(Location, location_id) is None:
+        return []
+    return _for_one(db, location_id, _candidates(db, category_id))[:limit]
+
+
+def need_places(db: Session, location_id: uuid.UUID, category_id: int, max_places: int = 20, per_place: int = 3) -> list[dict]:
+    """For a province (or any place), each town or district inside it that needs the item, highest need first, with
+    the NGOs to drop it at there (within 30 km, or working there by OCHA 3W). A place with none gets the nearest NGO
+    that takes the item and how far it is, so riders in Mirpur Khas are not sent to Karachi without knowing it."""
+    loc = db.get(Location, location_id)
+    if loc is None:
+        return []
+    inside = descendant_ids(db, location_id)
+    levels = list(db.scalars(select(NeedLevel).where(NeedLevel.location_id.in_(inside), NeedLevel.category_id == category_id,
+                                                     NeedLevel.level >= 1).order_by(NeedLevel.score.desc())))
+    places: dict[uuid.UUID, int] = {}
+    for nl in levels:   # areas count under their town, so one row per town or district
+        p = search_place(db, nl.location_id)
+        if p is not None and p.level != LocationLevel.province:
+            places.setdefault(p.id, nl.level)
+    if not places and loc.level != LocationLevel.province:
+        places[loc.id] = 0
+    cands = _candidates(db, category_id)
+    out = []
+    for pid, level in list(places.items())[:max_places]:
+        ngos = [x for x in _for_one(db, pid, cands) if x["reachable"] or x["active_here"]]
+        nearest = None
+        centre = _centre(db, pid)
+        if not any(x["reachable"] for x in ngos) and centre is not None:
+            far = [(distance_km(centre[0], centre[1], n.lat, n.lng), n, w) for n, w in cands if not n.location_approx]
+            if far:
+                km, n, w = min(far, key=lambda t: t[0])
+                nearest = _need_item(db, n, w, round(km, 1), False, False)
+        out.append({"place_id": str(pid), "place": location_path(db, pid)[-1], "level": level,
+                    "ngos": ngos[:per_place], "more": max(0, len(ngos) - per_place), "nearest": nearest})
+    return out

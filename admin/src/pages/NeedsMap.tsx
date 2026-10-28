@@ -485,14 +485,59 @@ type NeedNgo = {
 
 const FOUND_BY: Record<string, string> = { web_search: "Web search", openstreetmap: "OpenStreetMap", ocha_3w: "OCHA 3W", admin: "Added by admin" };
 
+type NeedPlace = { place_id: string; place: string; level: number; ngos: NeedNgo[]; more: number; nearest: NeedNgo | null };
+
+const warnChip = { height: 20, fontSize: 11, background: "var(--warn-bg)", color: "var(--warn)" };
+
+function NgoRow({ n, place, cell, far = false }: { n: NeedNgo; place: string; cell: { padding: string; verticalAlign: "top" }; far?: boolean }) {
+  const edge = n.active_here ? "var(--urgent)" : far ? "var(--warn)" : null;
+  const sourceInAbout = !!n.about && /OpenStreetMap|OCHA 3W/.test(n.about);
+  return (
+    <tr style={edge ? { boxShadow: `inset 3px 0 0 ${edge}` } : undefined}>
+      <td style={{ ...cell, minWidth: 180 }}>
+        {far && <div className="small" style={{ color: "var(--warn)", fontWeight: 600 }}>Nearest NGO, {n.distance_km} km from {place}</div>}
+        <strong>{n.name}</strong>
+        {n.about && <div className="muted small">{n.about}</div>}
+        {n.active_here && <div className="small" style={{ color: "var(--urgent)", fontWeight: 600 }}>{n.works_text ?? "Works here (OCHA 3W)"}</div>}
+        {!sourceInAbout && <div className="muted small">{FOUND_BY[n.found_by] ?? n.found_by}</div>}
+      </td>
+      <td style={{ ...cell, minWidth: 170 }}>
+        {n.location_approx ? <span style={{ color: "var(--warn)" }}>{n.city}: address not known yet</span> : n.address}
+        <div className="muted small">{n.city}{n.distance_km !== null ? ` · ${n.distance_km} km` : ""}</div>
+      </td>
+      <td style={{ ...cell, whiteSpace: "nowrap" }}>
+        {n.phone ? <a href={`tel:${n.phone.replace(/[^\d+]/g, "")}`}>{n.phone}</a> : <span className="muted">No phone yet</span>}
+        {n.website && <div><a className="small" href={n.website} target="_blank" rel="noreferrer">Website</a></div>}
+      </td>
+      <td style={{ ...cell, minWidth: 140 }} className="small">
+        {n.takes_listed ? n.takes.join(", ") : <span className="muted">Not confirmed (ask them)</span>}
+      </td>
+      <td style={cell}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-start" }}>
+          <span className={`chip ${n.phone_confirmed ? "ok" : ""}`} style={n.phone_confirmed ? { height: 20, fontSize: 11 } : warnChip}>
+            {n.phone_confirmed ? "✓ Called" : "Not called"}
+          </span>
+          <span className={`chip ${n.ban_checked ? "ok" : ""}`} style={n.ban_checked ? { height: 20, fontSize: 11 } : warnChip}>
+            {n.ban_checked ? "✓ Not banned" : "Ban list not checked"}
+          </span>
+          {n.registration && <span className="chip ok" style={{ height: 20, fontSize: 11 }}>{n.registration}</span>}
+        </div>
+      </td>
+      <td style={{ ...cell, whiteSpace: "nowrap" }}>
+        {!n.location_approx && <a className="btn ghost small" href={`https://www.google.com/maps/dir/?api=1&destination=${n.lat},${n.lng}`} target="_blank" rel="noreferrer">Directions</a>}
+      </td>
+    </tr>
+  );
+}
+
 /** Full-width detail for a picked need: why (one row per reason) and the NGOs to drop the item at, with contacts. */
 function NeedDetail({ picked, onFind, finding, onClose }: { picked: Picked; onFind: (placeId: string) => void; finding: boolean; onClose: () => void }) {
-  const [ngos, setNgos] = useState<NeedNgo[] | null>(null);
+  const [places, setPlaces] = useState<NeedPlace[] | null>(null);
   useEffect(() => {
-    setNgos(null);
-    if (!picked.placeId) { setNgos([]); return; }
-    api<NeedNgo[]>(`/admin/ngos/for-need?location_id=${picked.placeId}&category_id=${picked.need.category_id}`)
-      .then(setNgos).catch(() => setNgos([]));
+    setPlaces(null);
+    if (!picked.placeId) { setPlaces([]); return; }
+    api<NeedPlace[]>(`/admin/ngos/by-place?location_id=${picked.placeId}&category_id=${picked.need.category_id}`)
+      .then(setPlaces).catch(() => setPlaces([]));
   }, [picked.placeId, picked.need.category_id, finding]);
   const need = picked.need;
   const item = need.name.toLowerCase();
@@ -548,20 +593,28 @@ function NeedDetail({ picked, onFind, finding, onClose }: { picked: Picked; onFi
       </div>
 
       <div style={{ padding: "14px 18px 4px", display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-        <h3 style={{ margin: 0, fontSize: 14, marginRight: "auto" }}>NGOs that take {item} {picked.placeId ? `in or near ${picked.place}` : ""}</h3>
+        <div style={{ marginRight: "auto" }}>
+          <h3 style={{ margin: 0, fontSize: 14 }}>Where to drop {item}: nearest NGOs for each place</h3>
+          {places && places.length > 0 && (
+            <p className="muted small" style={{ margin: "2px 0 0" }}>
+              {places.filter((x) => x.ngos.some((n) => n.reachable)).length} of {places.length} places have an NGO within 30 km.
+              {places.some((x) => !x.ngos.some((n) => n.reachable)) ? " For the others press Find NGOs, or use the nearest one shown." : ""}
+            </p>
+          )}
+        </div>
         {picked.placeId && (
           <button className="btn ghost small" disabled={finding} onClick={() => onFind(picked.placeId as string)}>
-            {finding ? "Finding NGOs…" : `Find more NGOs in ${picked.place}`}
+            {finding ? "Finding NGOs… (up to a few minutes)" : `Find NGOs for every place in ${picked.place}`}
           </button>
         )}
       </div>
       {!picked.placeId ? (
         <p className="muted" style={{ padding: "4px 18px 16px", margin: 0 }}>Choose a province or a district to see NGOs there.</p>
-      ) : ngos === null ? (
+      ) : places === null ? (
         <p className="muted" style={{ padding: "4px 18px 16px", margin: 0 }}>Loading NGOs…</p>
-      ) : ngos.length === 0 ? (
+      ) : places.length === 0 ? (
         <p className="muted" style={{ padding: "4px 18px 16px", margin: 0 }}>
-          We know no NGO in or near {picked.place} that takes {item}. Press <strong>Find more NGOs</strong>, or add one you know on the <Link to="/ngos">NGOs page</Link>.
+          No place in {picked.place} needs {item} right now.
         </p>
       ) : (
         <div style={{ overflowX: "auto" }}>
@@ -569,47 +622,36 @@ function NeedDetail({ picked, onFind, finding, onClose }: { picked: Picked; onFi
             <thead>
               <tr><th>NGO</th><th>Office</th><th>Contact</th><th>Takes</th><th>Checks</th><th /></tr>
             </thead>
-            <tbody>
-              {ngos.map((n) => (
-                <tr key={n.id} style={n.active_here ? { boxShadow: "inset 3px 0 0 var(--urgent)" } : undefined}>
-                  <td style={{ ...cell, minWidth: 180 }}>
-                    <strong>{n.name}</strong>
-                    {n.about && <div className="muted small">{n.about}</div>}
-                    {n.active_here && <div className="small" style={{ color: "var(--urgent)", fontWeight: 600 }}>{n.works_text ?? "Works here (OCHA 3W)"}</div>}
-                    <div className="muted small">{FOUND_BY[n.found_by] ?? n.found_by}</div>
-                  </td>
-                  <td style={{ ...cell, minWidth: 170 }}>
-                    {n.location_approx ? <span style={{ color: "var(--warn)" }}>{n.city}: address not known yet</span> : n.address}
-                    <div className="muted small">{n.city}{n.distance_km !== null ? ` · ${n.distance_km} km` : ""}</div>
-                    {!n.reachable && <div className="muted small">Office outside {picked.place}: ask where to drop.</div>}
-                  </td>
-                  <td style={{ ...cell, whiteSpace: "nowrap" }}>
-                    {n.phone ? <a href={`tel:${n.phone.replace(/[^\d+]/g, "")}`}>{n.phone}</a> : <span className="muted">No phone yet</span>}
-                    {n.website && <div><a className="small" href={n.website} target="_blank" rel="noreferrer">Website</a></div>}
-                  </td>
-                  <td style={{ ...cell, minWidth: 140 }} className="small">
-                    {n.takes_listed ? n.takes.join(", ") : <span className="muted">Not confirmed (ask them)</span>}
-                  </td>
-                  <td style={cell}>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-start" }}>
-                      <span className={`chip ${n.phone_confirmed ? "ok" : ""}`} style={n.phone_confirmed ? { height: 20, fontSize: 11 } : { height: 20, fontSize: 11, background: "var(--warn-bg)", color: "var(--warn)" }}>
-                        {n.phone_confirmed ? "✓ Called" : "Not called"}
-                      </span>
-                      <span className={`chip ${n.ban_checked ? "ok" : ""}`} style={n.ban_checked ? { height: 20, fontSize: 11 } : { height: 20, fontSize: 11, background: "var(--warn-bg)", color: "var(--warn)" }}>
-                        {n.ban_checked ? "✓ Not banned" : "Ban list not checked"}
-                      </span>
-                      {n.registration && <span className="chip ok" style={{ height: 20, fontSize: 11 }}>{n.registration}</span>}
-                    </div>
-                  </td>
-                  <td style={{ ...cell, whiteSpace: "nowrap" }}>
-                    {!n.location_approx && <a className="btn ghost small" href={`https://www.google.com/maps/dir/?api=1&destination=${n.lat},${n.lng}`} target="_blank" rel="noreferrer">Directions</a>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
+            {places.map((pl) => {
+              const near = pl.ngos.filter((n) => n.reachable).length;
+              return (
+                <tbody key={pl.place_id}>
+                  <tr>
+                    <td colSpan={6} style={{ padding: "10px 10px 6px", background: "var(--bg)" }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <strong style={{ fontSize: 15 }}>{pl.place}</strong>
+                        {pl.level > 0 && <span className={`chip lv${pl.level}`} style={{ height: 20, fontSize: 11 }}>{LEVELS[pl.level].label} need</span>}
+                        <span className="muted small" style={{ marginRight: "auto" }}>
+                          {near > 0 ? `${near + pl.more} NGO${near + pl.more === 1 ? "" : "s"} within 30 km${pl.more ? ` (nearest ${pl.ngos.length} shown)` : ""}` : "No NGO we know within 30 km"}
+                        </span>
+                        <button className="btn ghost small" disabled={finding} onClick={() => onFind(pl.place_id)}>
+                          {near > 0 ? "Find more" : `Find NGOs in ${pl.place}`}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {pl.ngos.map((n) => <NgoRow key={n.id} n={n} place={pl.place} cell={cell} />)}
+                  {near === 0 && pl.nearest && <NgoRow key={pl.nearest.id} n={pl.nearest} place={pl.place} cell={cell} far />}
+                  {pl.ngos.length === 0 && !pl.nearest && (
+                    <tr><td colSpan={6} className="muted small" style={cell}>No NGO that takes {item} is known yet. Press Find NGOs, or add one on the <Link to="/ngos">NGOs page</Link>.</td></tr>
+                  )}
+                </tbody>
+              );
+            })}
           </table>
           <p className="muted small" style={{ padding: "6px 18px 14px", margin: 0 }}>
-            Red edge: works on this need here (OCHA 3W). Call an NGO before the first delivery and tick its checks on the <Link to="/ngos">NGOs page</Link>.
+            Red edge: works on this need here (OCHA 3W). Amber edge: the nearest NGO, but more than 30 km away. Call an NGO before
+            the first delivery and tick its checks on the <Link to="/ngos">NGOs page</Link>.
           </p>
         </div>
       )}

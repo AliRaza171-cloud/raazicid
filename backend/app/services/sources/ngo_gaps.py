@@ -11,8 +11,8 @@ Runs every NGO_FINDER_EVERY_HOURS (default daily) and from the admin buttons on 
 Every NGO found this way still needs the admin's checks (phone, banned lists) before donations are sent.
 """
 
-import re
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -26,13 +26,11 @@ from app.models.enums import LocationLevel
 from app.services import llm, ngo_finder, ngo_sources
 from app.services.geo import distance_km, in_pakistan
 from app.services.locations import ancestor_ids, descendant_ids, location_path
-from app.services.ngos import search_place
+from app.services.ngo_sources import is_ngo_name, takes_goods
+from app.services.ngos import need_places, search_place
 from app.services.sources.hapi_un import sector_categories
 
 GAP_KM = {LocationLevel.city: 30, LocationLevel.region: 30, LocationLevel.area: 10}
-NOT_NGO = re.compile(r"\b(UN|UNICEF|UNHCR|UNDP|UNFPA|UNOPS|UN-?HABITAT|UN ?WOMEN|WFP|WHO|IOM|FAO|OCHA|ILO|UNESCO|"
-                     r"united nations|world food programme|world health organi[sz]ation|government|department|ministry|"
-                     r"authority|NDMA|PDMA|directorate|district administration|commissioner)\b", re.I)
 MAX_CITIES = 8
 
 
@@ -70,14 +68,9 @@ def covered(spot: NeedSpot, ngos: list[NgoSpot]) -> bool:
     return False
 
 
-def gaps_of(spots: list[NeedSpot], ngos: list[NgoSpot]) -> list[NeedSpot]:
-    """Places in high or urgent need with no NGO nearby that takes the item, highest need first."""
-    return sorted((s for s in spots if s.level >= 2 and not covered(s, ngos)), key=lambda s: -s.score)
-
-
-def is_ngo_name(name: str) -> bool:
-    """UN agencies and government bodies do not take donated goods from the public."""
-    return bool(name.strip()) and not NOT_NGO.search(name)
+def gaps_of(spots: list[NeedSpot], ngos: list[NgoSpot], min_level: int = 2) -> list[NeedSpot]:
+    """Places in need (high or urgent by default) with no NGO nearby that takes the item, highest need first."""
+    return sorted((s for s in spots if s.level >= min_level and not covered(s, ngos)), key=lambda s: -s.score)
 
 
 def candidates_from_3w(sectors_by_org: dict[str, list[str]], names: dict[str, str], slug: str) -> list[tuple[str, list[str]]]:
@@ -115,12 +108,12 @@ def ensure_centre(db: Session, loc: Location) -> Optional[tuple[float, float]]:
     return None
 
 
-def find_gaps(db: Session, within: Optional[Any] = None) -> list[NeedSpot]:
+def find_gaps(db: Session, within: Optional[Any] = None, min_level: int = 2) -> list[NeedSpot]:
     locs = {l.id: l for l in db.scalars(select(Location))}
     slugs = {c.id: c.slug for c in db.scalars(select(Category))}
     allowed = set(descendant_ids(db, within)) if within else None
     spots = []
-    for nl in db.scalars(select(NeedLevel).where(NeedLevel.level >= 2)):
+    for nl in db.scalars(select(NeedLevel).where(NeedLevel.level >= min_level)):
         loc = locs.get(nl.location_id)
         if loc is None or loc.level == LocationLevel.province or (allowed is not None and loc.id not in allowed):
             continue
@@ -129,8 +122,8 @@ def find_gaps(db: Session, within: Optional[Any] = None) -> list[NeedSpot]:
         spots.append(NeedSpot(loc.id, nl.category_id, slugs.get(nl.category_id, ""), nl.level, nl.score, centre[0], centre[1],
                               GAP_KM.get(loc.level, 30), set(descendant_ids(db, loc.id))))
     ngos = [NgoSpot(n.lat, n.lng, n.location_id, {c.id for c in n.categories})
-            for n in db.scalars(select(Ngo).where(Ngo.is_active.is_(True)))]
-    return gaps_of(spots, ngos)
+            for n in db.scalars(select(Ngo).where(Ngo.is_active.is_(True))) if takes_goods(n.name, n.about, n.found_by)]
+    return gaps_of(spots, ngos, min_level)
 
 
 def _osm(db: Session, city: Location, centre: tuple[float, float]) -> int:
@@ -139,6 +132,8 @@ def _osm(db: Session, city: Location, centre: tuple[float, float]) -> int:
     known = list(db.scalars(select(Ngo).where(Ngo.location_id.in_(descendant_ids(db, city.id)))))
     added = 0
     for o in offices:
+        if not takes_goods(o["name"], o["kind"], "openstreetmap"):
+            continue
         n = next((k for k in known if ngo_sources.same_org(k.name, o["name"])), None)
         if n is not None:
             if n.location_approx:
@@ -228,7 +223,7 @@ def for_alerts(db: Session, alert_id: Optional[Any] = None, use_ai: bool = True)
             inside = set(descendant_ids(db, city.id))
             def known() -> int:
                 return sum(1 for n in db.scalars(select(Ngo).where(Ngo.is_active.is_(True)))
-                           if _takes_any(n, need_ids) and (n.location_id in inside or
+                           if _takes_any(n, need_ids) and takes_goods(n.name, n.about, n.found_by) and (n.location_id in inside or
                                                            distance_km(centre[0], centre[1], n.lat, n.lng) <= 30))
             before = known()
             added = _osm(db, city, centre)
@@ -249,6 +244,9 @@ def for_alerts(db: Session, alert_id: Optional[Any] = None, use_ai: bool = True)
 def for_place(db: Session, location_id: Any, category_id: int, use_ai: bool = True) -> str:
     """NGOs that take one item for one place, whatever its need level (the admin asked from Needs by area)."""
     cat = db.get(Category, category_id)
+    loc = db.get(Location, location_id)
+    if cat is not None and loc is not None and loc.level == LocationLevel.province:
+        return _for_places(db, loc, cat, use_ai)
     city = search_place(db, location_id)
     if cat is None or city is None:
         return "Choose a place and an item"
@@ -260,7 +258,7 @@ def for_place(db: Session, location_id: Any, category_id: int, use_ai: bool = Tr
 
     def known() -> int:
         return sum(1 for n in db.scalars(select(Ngo).where(Ngo.is_active.is_(True)))
-                   if _takes_any(n, {category_id}) and (n.location_id in inside or
+                   if _takes_any(n, {category_id}) and takes_goods(n.name, n.about, n.found_by) and (n.location_id in inside or
                                                         distance_km(centre[0], centre[1], n.lat, n.lng) <= 30))
     before = known()
     added = _osm(db, city, centre) + _from_3w(db, location_id, slug, city, centre)
@@ -277,6 +275,40 @@ def for_place(db: Session, location_id: Any, category_id: int, use_ai: bool = Tr
             + ("" if after else " None yet: add one you know on the NGOs page."))
 
 
+def _for_places(db: Session, province: Location, cat: Category, use_ai: bool) -> str:
+    """A province: search NGOs around each place in it that needs the item and has none within 30 km, highest need
+    first (Mirpur Khas, Badin, Jacobabad... not just the provincial capital). OpenStreetMap and OCHA 3W for each, then
+    a web search for those still empty (at most NGO_AI_SEARCHES_PER_RUN)."""
+    places = [p for p in need_places(db, province.id, cat.id) if p["ngos"] == []][:MAX_CITIES]
+    if not places:
+        return f"Every place in {province.name} that needs {cat.name.lower()} already has an NGO within 30 km."
+    ai_left = settings.NGO_AI_SEARCHES_PER_RUN if (use_ai and llm.available()) else 0
+    found, empty, notes = [], [], []
+    for p in places:
+        city = db.get(Location, uuid.UUID(p["place_id"]))
+        centre = ensure_centre(db, city)
+        if centre is None:
+            notes.append(f"{city.name}: no map position")
+            continue
+        added = _osm(db, city, centre) + _from_3w(db, city.id, cat.slug, city, centre)
+        if added == 0 and ai_left > 0:
+            ai_left -= 1
+            try:
+                added += ngo_finder.find_and_save(db, city.id, cat.id)["added"]
+            except (llm.LLMError, ValueError) as e:
+                notes.append(f"{city.name}: web search failed ({str(e)[:60]})")
+                ai_left = 0 if getattr(e, "out_of_credit", False) else ai_left
+        (found if added else empty).append(f"{city.name} (+{added})" if added else city.name)
+    left = len([p for p in need_places(db, province.id, cat.id) if p["ngos"] == []])
+    parts = [f"Searched {len(places)} places in {province.name} that need {cat.name.lower()}"]
+    if found:
+        parts.append("found NGOs in " + ", ".join(found))
+    if empty:
+        parts.append("nothing new in " + ", ".join(empty))
+    parts.append(f"{left} places still have no NGO within 30 km" if left else "every place now has an NGO within 30 km")
+    return "; ".join(parts) + "." + (" " + "; ".join(notes) if notes else "")
+
+
 def run(db: Session, source_id: int, location_id: Optional[Any] = None, use_ai: bool = True,
         alert_id: Optional[Any] = None, category_id: Optional[int] = None) -> str:
     if alert_id:   # one disaster, right after it was confirmed or added
@@ -290,9 +322,9 @@ def run(db: Session, source_id: int, location_id: Optional[Any] = None, use_ai: 
 
 
 def _gaps_run(db: Session, location_id: Optional[Any], use_ai: bool) -> str:
-    gaps = find_gaps(db, location_id)
+    gaps = find_gaps(db, location_id, min_level=1)   # highest need first, then places with "some" need
     if not gaps:
-        return "No gaps: every place in high or urgent need has an NGO nearby that takes the item."
+        return "No gaps: every place in need has an NGO nearby that takes the item."
     cities: dict[Any, NeedSpot] = {}
     for g in gaps:   # highest need first, one entry per city
         city = search_place(db, g.location_id)
@@ -320,7 +352,7 @@ def _gaps_run(db: Session, location_id: Optional[Any], use_ai: bool) -> str:
             except (llm.LLMError, ValueError) as e:
                 notes.append(f"{name}: web search failed ({str(e)[:80]})")
                 ai_left = 0 if getattr(e, "out_of_credit", False) else ai_left
-    left = find_gaps(db, location_id)
+    left = find_gaps(db, location_id, min_level=1)
     left_places = []
     for g in left:
         p = location_path(db, g.location_id)[-1]

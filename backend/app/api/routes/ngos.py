@@ -20,7 +20,7 @@ from app.services import llm, ngo_finder, ngo_sources
 from app.services.sources import ngo_gaps
 from app.services.sources.runner import run_source
 from app.services.locations import descendant_ids
-from app.services.ngos import ngo_out, ngos_for_need, search_place
+from app.services.ngos import ngo_out, need_places, ngos_for_need, search_place
 
 router = APIRouter(prefix="/admin/ngos", tags=["admin: NGOs"])
 admin_only = require_roles(Role.admin)
@@ -69,6 +69,14 @@ def for_need(location_id: uuid.UUID, category_id: int, _: User = Depends(admin_o
     if db.get(Location, location_id) is None:
         raise api_error(404, "location_not_found", "Place not found")
     return ngos_for_need(db, location_id, category_id)
+
+
+@router.get("/by-place")
+def by_place(location_id: uuid.UUID, category_id: int, _: User = Depends(admin_only), db: Session = Depends(get_db)):
+    """For a province or district: each place inside it that needs this item, with the NGOs nearest to it."""
+    if db.get(Location, location_id) is None:
+        raise api_error(404, "location_not_found", "Place not found")
+    return need_places(db, location_id, category_id)
 
 
 @router.post("", response_model=NgoOut, status_code=status.HTTP_201_CREATED)

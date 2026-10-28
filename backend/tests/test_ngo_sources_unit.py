@@ -3,7 +3,7 @@
 import uuid
 from datetime import date
 
-from app.services.ngo_sources import Presence, overpass_query, parse_osm, same_org, works_for
+from app.services.ngo_sources import takes_goods, Presence, overpass_query, parse_osm, same_org, works_for
 
 
 def test_same_org_names():
@@ -47,3 +47,14 @@ def test_parse_osm_offices():
     edhi = parse_osm({"elements": [{"type": "node", "id": 5, "lat": 27.8, "lon": 66.6,
                                     "tags": {"name": "Edhi Centre Khuzdar", "amenity": "ambulance_station"}}]})
     assert edhi[0]["name"] == "Edhi Centre Khuzdar" and edhi[0]["kind"] == "ambulance station"
+
+
+def test_takes_goods_leaves_out_un_government_and_businesses():
+    assert takes_goods("Saylani Welfare Trust - Numaish Branch", "Social facility on OpenStreetMap", "openstreetmap")
+    assert takes_goods("Alamgir Welfare Trust International", "Ngo on OpenStreetMap", "openstreetmap")
+    assert not takes_goods("World Health Organization", "Ngo on OpenStreetMap", "openstreetmap")
+    assert not takes_goods("Shahab Ghani & Associates", "Association on OpenStreetMap", "openstreetmap")
+    assert not takes_goods("Baloch Garden", "Association on OpenStreetMap", "openstreetmap")      # association, no charity word
+    assert takes_goods("Mirpur Khas Welfare Society", "Association on OpenStreetMap", "openstreetmap")
+    assert not takes_goods("PDMA Sindh", None, "web_search")
+    assert takes_goods("Baloch Garden", None, "admin")                                           # the admin's own choice

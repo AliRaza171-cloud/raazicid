@@ -27,6 +27,35 @@ STOP = {"the", "of", "for", "and", "pakistan", "pak", "foundation", "trust", "we
         "society", "international", "association", "ngo", "charity", "charitable", "network", "program", "programme",
         "development", "center", "centre", "pvt", "ltd", "limited", "registered", "intl", "org"}
 
+NOT_NGO = re.compile(r"\b(UN|UNICEF|UNHCR|UNDP|UNFPA|UNOPS|UN-?HABITAT|UN ?WOMEN|WFP|WHO|IOM|FAO|OCHA|ILO|UNESCO|"
+                     r"united nations|world food programme|world health organi[sz]ation|government|department|ministry|"
+                     r"authority|NDMA|PDMA|directorate|district administration|commissioner)\b", re.I)
+BUSINESS = re.compile(r"(&\s*associates|\bassociates\b|\badvocates?\b|\blaw (firm|chambers?)\b|\bconsult|\bpvt\b|"
+                      r"\bltd\b|\blimited\b|\bcompany\b|\bbank\b|\binsurance\b|\breal estate\b|\bproperties\b|"
+                      r"\bgarden\b|\bpark\b|\bclub\b|\bunion\b|\bchamber of\b|\bpress club\b|\bbar association\b)", re.I)
+CHARITY = re.compile(r"(welfare|trust|foundation|charit|relief|\baid\b|\bngo\b|society|organi[sz]ation|khidmat|"
+                     r"edhi|saylani|chhipa|akhuwat|rizq|robin hood|khair|imdad|madad|sewa|seva|zakat|bait|darul|"
+                     r"orphan|yateem|shelter|hope|care|rescue|humanit|sahara|ummeed|umeed|sadqa|langar|dastarkhwan|"
+                     r"خدمت|ویلفیئر|ٹرسٹ|فاؤنڈیشن)", re.I)
+
+
+def is_ngo_name(name: str) -> bool:
+    """UN agencies and government bodies do not take donated goods from the public."""
+    return bool((name or "").strip()) and not NOT_NGO.search(name)
+
+
+def takes_goods(name: str, about: Optional[str] = None, found_by: str = "admin") -> bool:
+    """Could this organisation take donated goods? NGOs the admin added always count. Found ones must not be a UN
+    agency, government body or business (law firms, "& Associates"), and an OpenStreetMap "association" (often a
+    residents' group, a garden or a club) must have a charity word in its name. Pure, unit-tested."""
+    if found_by == "admin":
+        return True
+    if not is_ngo_name(name) or BUSINESS.search(name):
+        return False
+    if found_by == "openstreetmap" and (about or "").lower().startswith("association") and not CHARITY.search(name):
+        return False
+    return True
+
 
 # ---------- matching names (pure, unit-tested) ----------
 
