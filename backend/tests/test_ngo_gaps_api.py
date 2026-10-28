@@ -87,8 +87,9 @@ def test_earthquake_finds_ngos_and_needs_show_where_to_drop(client, db, monkeypa
 
 
 def test_province_need_shows_ngos_per_place_and_searches_each_place(client, db, monkeypatch):
-    """Sindh needs blankets in Sukkur: the NGOs table is per place (not only Karachi), a place with none shows the
-    nearest NGO and how far, and "Find more NGOs in Sindh" searches around Sukkur itself."""
+    """Sindh needs blankets in Sukkur: the NGOs table is per place (not only Karachi), a place with no NGO of its own
+    shows the nearest town that has one (Larkana, not Karachi) and how far, and "Find NGOs" for Sindh searches around
+    Sukkur itself."""
     from tests.test_donations_api import make_ngo
 
     admin_h = admin_headers(client, db)
@@ -97,6 +98,7 @@ def test_province_need_shows_ngos_per_place_and_searches_each_place(client, db, 
     db.add(need)
     db.commit()
     make_ngo(client, admin_h, db, name="Karachi Blanket Bank", where="Karachi", lat=24.86, lng=67.01, category_ids=[4])
+    make_ngo(client, admin_h, db, name="Larkana Blanket Bank", where="Larkana", lat=27.56, lng=68.21, category_ids=[4])
     seen = []
     monkeypatch.setattr(ngo_sources, "osm_offices", lambda lat, lng, radius: seen.append((round(lat), round(lng))) or [
         {"name": "Sukkur Welfare Society", "lat": 27.70, "lng": 68.86, "address": "Barrage Road", "phone": None,
@@ -106,16 +108,17 @@ def test_province_need_shows_ngos_per_place_and_searches_each_place(client, db, 
     params = {"location_id": str(sindh), "category_id": 4}
     try:
         rows = {r["place"]: r for r in client.get(f"{API}/admin/ngos/by-place", headers=admin_h, params=params).json()}
-        assert rows["Sukkur"]["ngos"] == [] and rows["Sukkur"]["nearest"]["name"] == "Karachi Blanket Bank"
-        assert rows["Sukkur"]["nearest"]["distance_km"] > 300
+        fb = rows["Sukkur"]["fallback"]
+        assert rows["Sukkur"]["ngos"] == [] and fb["town"] == "Larkana" and 40 < fb["km"] < 90
+        assert [n["name"] for n in fb["ngos"]] == ["Larkana Blanket Bank"]
 
         r = client.post(f"{API}/admin/ngos/fill-gaps", headers=admin_h, json={**params, "use_ai": False}).json()
         assert r["ok"] and "Sukkur (+1)" in r["status"], r
         assert (28, 69) in seen                                       # searched around Sukkur, not around Karachi
         rows = {r["place"]: r for r in client.get(f"{API}/admin/ngos/by-place", headers=admin_h, params=params).json()}
         assert [n["name"] for n in rows["Sukkur"]["ngos"]] == ["Sukkur Welfare Society"]   # the WHO office is left out
-        assert rows["Sukkur"]["nearest"] is None
+        assert rows["Sukkur"]["fallback"] is None
     finally:
-        db.execute(delete(Ngo).where(Ngo.name.in_(["Karachi Blanket Bank", "Sukkur Welfare Society"])))
+        db.execute(delete(Ngo).where(Ngo.name.in_(["Karachi Blanket Bank", "Larkana Blanket Bank", "Sukkur Welfare Society"])))
         db.execute(delete(NeedLevel).where(NeedLevel.id == need.id))
         db.commit()

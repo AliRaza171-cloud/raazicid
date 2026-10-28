@@ -9,7 +9,6 @@ const DOT = ["#9aa39e", "#d4a800", "#d9772b", "#a2361a"];
 const NGO_COLOR = "#2449A8";
 const GAP_RING = "#a2361a";
 // A place in high or urgent need is a "coverage gap" when no NGO we know that takes the item is this close
-const GAP_KM: Record<string, number> = { city: 30, region: 30, area: 10 };
 
 type Crumb = { id: string | null; name: string };
 type Picked = { place: string; placeId: string | null; need: AreaNeed };
@@ -171,14 +170,15 @@ export default function NeedsMap() {
         continue;
       }
       const nearest = nearestFor(row, cat);
-      const limit = GAP_KM[row.level] ?? 30;
-      if (!nearest || nearest.km > limit) {
+      const towns = [row.name, ...trail.slice(2).map((t) => t.name)];   // the place and the city it is part of
+      const own = points.some((p) => takes(p, cat) && towns.some((t) => p.location_path.includes(t)));
+      if (!own) {
         out.push({ row, level: lv, need: need.name, nearest,
-          why: nearest ? `Nearest NGO for ${need.name.toLowerCase()} is ${Math.round(nearest.km)} km away` : `No NGO we know takes ${need.name.toLowerCase()}` });
+          why: `No NGO we know in ${row.name} takes ${need.name.toLowerCase()}` + (nearest ? `. Nearest: ${Math.round(nearest.km)} km away` : "") });
       }
     }
     return out.sort((a, b) => b.level - a.level || (b.nearest?.km ?? 1e9) - (a.nearest?.km ?? 1e9));
-  }, [data, points, categoryId, levelOf, nearestFor]);
+  }, [data, points, categoryId, levelOf, nearestFor, trail]);
 
   const gapIds = new Set(gaps.map((g) => g.row.id));
   // Places in high or urgent need where OCHA 3W lists nobody working on it
@@ -378,7 +378,8 @@ export default function NeedsMap() {
                 Coverage gaps{categoryId !== null ? ` for ${cats.find((c) => c.id === categoryId)?.name.toLowerCase()}` : ""} in {here.name}
               </h2>
               <p className="muted small" style={{ margin: "2px 0 0" }}>
-                High or urgent need, but no NGO we know that takes the item within {GAP_KM.city} km (10 km for an area).
+                High or urgent need, but no NGO we know in the place itself takes the item. Until one is found, riders use the
+                nearest town with NGOs (shown when you open the need).
                 The NGO finder looks for NGOs there, highest need first: OpenStreetMap offices and OCHA 3W organisations working
                 on that need (free), then a web search where those found nothing. It also runs by itself once a day.
               </p>
@@ -485,17 +486,19 @@ type NeedNgo = {
 
 const FOUND_BY: Record<string, string> = { web_search: "Web search", openstreetmap: "OpenStreetMap", ocha_3w: "OCHA 3W", admin: "Added by admin" };
 
-type NeedPlace = { place_id: string; place: string; level: number; ngos: NeedNgo[]; more: number; nearest: NeedNgo | null };
+type NeedPlace = {
+  place_id: string; place: string; level: number; has_position: boolean; ngos: NeedNgo[]; more: number;
+  fallback: { town_id: string; town: string; km: number; ngos: NeedNgo[]; more: number } | null;
+};
 
 const warnChip = { height: 20, fontSize: 11, background: "var(--warn-bg)", color: "var(--warn)" };
 
-function NgoRow({ n, place, cell, far = false }: { n: NeedNgo; place: string; cell: { padding: string; verticalAlign: "top" }; far?: boolean }) {
+function NgoRow({ n, cell, far = false }: { n: NeedNgo; cell: { padding: string; verticalAlign: "top" }; far?: boolean }) {
   const edge = n.active_here ? "var(--urgent)" : far ? "var(--warn)" : null;
   const sourceInAbout = !!n.about && /OpenStreetMap|OCHA 3W/.test(n.about);
   return (
     <tr style={edge ? { boxShadow: `inset 3px 0 0 ${edge}` } : undefined}>
       <td style={{ ...cell, minWidth: 180 }}>
-        {far && <div className="small" style={{ color: "var(--warn)", fontWeight: 600 }}>Nearest NGO, {n.distance_km} km from {place}</div>}
         <strong>{n.name}</strong>
         {n.about && <div className="muted small">{n.about}</div>}
         {n.active_here && <div className="small" style={{ color: "var(--urgent)", fontWeight: 600 }}>{n.works_text ?? "Works here (OCHA 3W)"}</div>}
@@ -597,8 +600,8 @@ function NeedDetail({ picked, onFind, finding, onClose }: { picked: Picked; onFi
           <h3 style={{ margin: 0, fontSize: 14 }}>Where to drop {item}: nearest NGOs for each place</h3>
           {places && places.length > 0 && (
             <p className="muted small" style={{ margin: "2px 0 0" }}>
-              {places.filter((x) => x.ngos.some((n) => n.reachable)).length} of {places.length} places have an NGO within 30 km.
-              {places.some((x) => !x.ngos.some((n) => n.reachable)) ? " For the others press Find NGOs, or use the nearest one shown." : ""}
+              {places.filter((x) => x.ngos.some((n) => n.reachable)).length} of {places.length} places have an NGO of their own.
+              {places.some((x) => !x.ngos.some((n) => n.reachable)) ? " The others show the nearest town with NGOs until one is found there." : ""}
             </p>
           )}
         </div>
@@ -623,7 +626,8 @@ function NeedDetail({ picked, onFind, finding, onClose }: { picked: Picked; onFi
               <tr><th>NGO</th><th>Office</th><th>Contact</th><th>Takes</th><th>Checks</th><th /></tr>
             </thead>
             {places.map((pl) => {
-              const near = pl.ngos.filter((n) => n.reachable).length;
+              const own = pl.ngos.filter((n) => n.reachable).length;
+              const fb = own === 0 ? pl.fallback : null;
               return (
                 <tbody key={pl.place_id}>
                   <tr>
@@ -631,26 +635,32 @@ function NeedDetail({ picked, onFind, finding, onClose }: { picked: Picked; onFi
                       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                         <strong style={{ fontSize: 15 }}>{pl.place}</strong>
                         {pl.level > 0 && <span className={`chip lv${pl.level}`} style={{ height: 20, fontSize: 11 }}>{LEVELS[pl.level].label} need</span>}
-                        <span className="muted small" style={{ marginRight: "auto" }}>
-                          {near > 0 ? `${near + pl.more} NGO${near + pl.more === 1 ? "" : "s"} within 30 km${pl.more ? ` (nearest ${pl.ngos.length} shown)` : ""}` : "No NGO we know within 30 km"}
+                        <span className="small" style={{ marginRight: "auto", color: own > 0 ? "var(--muted)" : "var(--warn)", fontWeight: own > 0 ? 400 : 600 }}>
+                          {own > 0
+                            ? `${own + pl.more} NGO${own + pl.more === 1 ? "" : "s"} in ${pl.place}${pl.more ? ` (${pl.ngos.length} shown)` : ""}`
+                            : fb
+                              ? `No NGO in ${pl.place} yet. Nearest town with NGOs: ${fb.town}, ${fb.km} km`
+                              : !pl.has_position
+                                ? `No NGO in ${pl.place} yet. Press Find NGOs (it also puts ${pl.place} on the map)`
+                                : `No NGO in ${pl.place} or any town near it yet`}
                         </span>
                         <button className="btn ghost small" disabled={finding} onClick={() => onFind(pl.place_id)}>
-                          {near > 0 ? "Find more" : `Find NGOs in ${pl.place}`}
+                          {own > 0 ? "Find more" : `Find NGOs in ${pl.place}`}
                         </button>
                       </div>
                     </td>
                   </tr>
-                  {pl.ngos.map((n) => <NgoRow key={n.id} n={n} place={pl.place} cell={cell} />)}
-                  {near === 0 && pl.nearest && <NgoRow key={pl.nearest.id} n={pl.nearest} place={pl.place} cell={cell} far />}
-                  {pl.ngos.length === 0 && !pl.nearest && (
-                    <tr><td colSpan={6} className="muted small" style={cell}>No NGO that takes {item} is known yet. Press Find NGOs, or add one on the <Link to="/ngos">NGOs page</Link>.</td></tr>
+                  {pl.ngos.map((n) => <NgoRow key={n.id} n={n} cell={cell} />)}
+                  {fb && fb.ngos.map((n) => <NgoRow key={`fb-${n.id}`} n={n} cell={cell} far />)}
+                  {fb && fb.more > 0 && (
+                    <tr><td colSpan={6} className="muted small" style={cell}>{fb.more} more NGO{fb.more === 1 ? "" : "s"} in {fb.town}: see the NGOs page.</td></tr>
                   )}
                 </tbody>
               );
             })}
           </table>
           <p className="muted small" style={{ padding: "6px 18px 14px", margin: 0 }}>
-            Red edge: works on this need here (OCHA 3W). Amber edge: the nearest NGO, but more than 30 km away. Call an NGO before
+            Red edge: works on this need here (OCHA 3W). Amber edge: in the nearest town, used until an NGO is found in the place. Call an NGO before
             the first delivery and tick its checks on the <Link to="/ngos">NGOs page</Link>.
           </p>
         </div>

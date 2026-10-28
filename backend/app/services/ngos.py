@@ -164,7 +164,7 @@ def _need_order(x: dict) -> tuple:
             x["distance_km"] if x["distance_km"] is not None else 999)
 
 
-def _candidates(db: Session, category_id: int) -> list[tuple[Ngo, Works]]:
+def ngos_taking(db: Session, category_id: int) -> list[tuple[Ngo, Works]]:
     """Active NGOs that take this item (or everything) and can take donated goods at all."""
     index = load_index(db)
     out = []
@@ -181,34 +181,70 @@ def _centre(db: Session, location_id: uuid.UUID) -> Optional[tuple[float, float]
     return next(((l.lat, l.lng) for l in chain if l is not None and l.lat is not None and l.level != LocationLevel.province), None)
 
 
-def _for_one(db: Session, location_id: uuid.UUID, cands: list[tuple[Ngo, Works]]) -> list[dict]:
-    inside = set(descendant_ids(db, location_id))
+def served_ids(db: Session, location_id: uuid.UUID) -> set:
+    """Where an NGO must be filed to count as "in" a place: the place, anything inside it, and the town or city it is
+    part of (Karachi NGOs serve Lyari and Karachi South), never just the same province."""
     chain = [db.get(Location, i) for i in ancestor_ids(db, location_id)]
-    here = inside | {l.id for l in chain if l is not None and l.level != LocationLevel.province}
+    return set(descendant_ids(db, location_id)) | {l.id for l in chain if l is not None and l.level != LocationLevel.province}
+
+
+def _for_one(db: Session, location_id: uuid.UUID, cands: list[tuple[Ngo, Works]]) -> list[dict]:
+    """NGOs in the place (filed there, or OCHA 3W says they work there), nearest first. No distance limit: a place
+    counts as covered only by NGOs in it; otherwise the nearest town with NGOs is used (need_places)."""
+    here = served_ids(db, location_id)
     centre = _centre(db, location_id)
     out = []
     for n, works in cands:
         active = bool(works.location_ids & here)
-        dist = None if (centre is None or n.location_approx) else round(distance_km(centre[0], centre[1], n.lat, n.lng), 1)
-        reachable = n.location_id in inside or (dist is not None and dist <= 30) or (n.location_approx and n.location_id in here)
+        reachable = n.location_id in here
         if reachable or active:
+            dist = None if (centre is None or n.location_approx) else round(distance_km(centre[0], centre[1], n.lat, n.lng), 1)
             out.append(_need_item(db, n, works, dist, reachable, active))
     return sorted(out, key=_need_order)
 
 
 def ngos_for_need(db: Session, location_id: uuid.UUID, category_id: int, limit: int = 15) -> list[dict]:
-    """NGOs to drop this item at for this place: offices in the place or within 30 km that take the item, and NGOs
-    OCHA 3W says work there. Order: reachable offices first, then working there (3W), then those that list the item
-    (not just "everything"), then checked ones, then nearest."""
+    """NGOs to drop this item at for this place: NGOs in the place that take the item, and NGOs OCHA 3W says work
+    there. Order: offices in the place first, then working there (3W), then those that list the item (not just
+    "everything"), then checked ones, then nearest."""
     if db.get(Location, location_id) is None:
         return []
-    return _for_one(db, location_id, _candidates(db, category_id))[:limit]
+    return _for_one(db, location_id, ngos_taking(db, category_id))[:limit]
+
+
+def towns_with_ngos(db: Session, cands: list[tuple[Ngo, Works]]) -> dict[uuid.UUID, list[tuple[Ngo, Works]]]:
+    """The town (city, else district) each NGO is in, with the NGOs there."""
+    out: dict[uuid.UUID, list[tuple[Ngo, Works]]] = {}
+    for n, w in cands:
+        town = search_place(db, n.location_id)
+        if town is not None and town.level != LocationLevel.province:
+            out.setdefault(town.id, []).append((n, w))
+    return out
+
+
+def nearest_town(db: Session, location_id: uuid.UUID, towns: dict[uuid.UUID, list]) -> Optional[tuple[uuid.UUID, float]]:
+    """The nearest other town or city that has NGOs (Jamshoro -> Hyderabad), by the distance between their centres."""
+    centre = _centre(db, location_id)
+    if centre is None:
+        return None
+    here = served_ids(db, location_id)
+    best = None
+    for tid in towns:
+        if tid in here:
+            continue
+        c = _centre(db, tid)
+        if c is None:
+            continue
+        km = distance_km(centre[0], centre[1], c[0], c[1])
+        if best is None or km < best[1]:
+            best = (tid, km)
+    return best
 
 
 def need_places(db: Session, location_id: uuid.UUID, category_id: int, max_places: int = 20, per_place: int = 3) -> list[dict]:
     """For a province (or any place), each town or district inside it that needs the item, highest need first, with
-    the NGOs to drop it at there (within 30 km, or working there by OCHA 3W). A place with none gets the nearest NGO
-    that takes the item and how far it is, so riders in Mirpur Khas are not sent to Karachi without knowing it."""
+    the NGOs in that place to drop it at. A place with none gets the nearest town that has NGOs taking the item
+    (Jamshoro -> Hyderabad) and its NGOs, with the distance, so riders know where to go."""
     loc = db.get(Location, location_id)
     if loc is None:
         return []
@@ -222,17 +258,23 @@ def need_places(db: Session, location_id: uuid.UUID, category_id: int, max_place
             places.setdefault(p.id, nl.level)
     if not places and loc.level != LocationLevel.province:
         places[loc.id] = 0
-    cands = _candidates(db, category_id)
+    cands = ngos_taking(db, category_id)
+    towns = towns_with_ngos(db, cands)
     out = []
     for pid, level in list(places.items())[:max_places]:
-        ngos = [x for x in _for_one(db, pid, cands) if x["reachable"] or x["active_here"]]
-        nearest = None
-        centre = _centre(db, pid)
-        if not any(x["reachable"] for x in ngos) and centre is not None:
-            far = [(distance_km(centre[0], centre[1], n.lat, n.lng), n, w) for n, w in cands if not n.location_approx]
-            if far:
-                km, n, w = min(far, key=lambda t: t[0])
-                nearest = _need_item(db, n, w, round(km, 1), False, False)
+        ngos = _for_one(db, pid, cands)
+        fallback = None
+        if not any(x["reachable"] for x in ngos):
+            hit = nearest_town(db, pid, towns)
+            if hit is not None:
+                tid, km = hit
+                centre = _centre(db, pid)
+                items = [_need_item(db, n, w, None if n.location_approx else round(distance_km(centre[0], centre[1], n.lat, n.lng), 1),
+                                    False, False) for n, w in towns[tid]]
+                items.sort(key=_need_order)
+                fallback = {"town_id": str(tid), "town": location_path(db, tid)[-1], "km": round(km),
+                            "ngos": items[:per_place], "more": max(0, len(items) - per_place)}
         out.append({"place_id": str(pid), "place": location_path(db, pid)[-1], "level": level,
-                    "ngos": ngos[:per_place], "more": max(0, len(ngos) - per_place), "nearest": nearest})
+                    "has_position": _centre(db, pid) is not None,
+                    "ngos": ngos[:per_place], "more": max(0, len(ngos) - per_place), "fallback": fallback})
     return out

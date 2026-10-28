@@ -11,19 +11,21 @@ def spot(loc, cat=4, level=2, score=60, lat=31.27, lng=72.32, radius=30, inside=
     return NeedSpot(loc, cat, "blankets", level, score, lat, lng, radius, inside or {loc})
 
 
-def test_gap_when_no_ngo_nearby_takes_the_item():
+def test_gap_when_no_ngo_in_the_place_takes_the_item():
     need = spot(JHANG)
-    food_only = NgoSpot(31.27, 72.33, uuid.uuid4(), {1})
-    far_any = NgoSpot(31.52, 74.35, uuid.uuid4(), set())          # Lahore, 230 km away
-    assert gaps_of([need], [food_only, far_any]) == [need]
-    near_any = NgoSpot(31.30, 72.35, uuid.uuid4(), set())          # takes everything, 4 km away
-    assert gaps_of([need], [near_any]) == [] and covered(need, [near_any])
+    food_only = NgoSpot(31.27, 72.33, JHANG, {1})                   # in Jhang, but takes only food
+    near_elsewhere = NgoSpot(31.30, 72.35, uuid.uuid4(), set())     # 4 km away, but filed in another town
+    assert gaps_of([need], [food_only, near_elsewhere]) == [need]    # no distance rule: the nearest town is shown instead
+    in_jhang = NgoSpot(31.27, 72.32, JHANG, set())                  # takes everything, in Jhang
+    assert gaps_of([need], [in_jhang]) == [] and covered(need, [in_jhang])
 
 
-def test_filed_inside_the_place_counts_even_without_a_map_position():
+def test_filed_inside_the_place_or_its_city_counts():
     need = spot(KARACHI, lat=None, lng=None, inside={KARACHI, LYARI})
     assert covered(need, [NgoSpot(30.0, 69.0, LYARI, {4})])      # approximate pin, but filed in Lyari
     assert not covered(need, [NgoSpot(24.86, 67.0, uuid.uuid4(), {4})])
+    lyari = spot(LYARI, inside={LYARI, KARACHI})                    # an area counts NGOs of the city it is in
+    assert covered(lyari, [NgoSpot(24.86, 67.0, KARACHI, {4})])
 
 
 def test_only_high_or_urgent_and_highest_first():

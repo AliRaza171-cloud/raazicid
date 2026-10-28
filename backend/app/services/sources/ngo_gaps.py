@@ -1,7 +1,8 @@
 """NGO finder for places in need (data source "ngo_finder"): find NGOs where they are missing, most needed first.
 
-A "gap" is a place with high or urgent need for an item and no NGO we know nearby that takes it (30 km from a city or
-district, 10 km from an area). For each gap, highest need first, three sources are tried, free ones first:
+A "gap" is a place in need of an item with no NGO we know in it that takes it (filed in the place, inside it, or in the
+town it is part of). No distance rule: until one is found, riders use the nearest town that has one (Jamshoro ->
+Hyderabad). For each gap, highest need first, three sources are tried, free ones first:
   1. OpenStreetMap: NGO, charity and social-facility offices around the city (free, no key).
   2. OCHA 3W (who does what where, from HDX, already stored): organisations working in that district on a sector
      that serves the needed item (shelter -> blankets, WASH -> hygiene...). UN agencies and government bodies are left
@@ -27,7 +28,7 @@ from app.services import llm, ngo_finder, ngo_sources
 from app.services.geo import distance_km, in_pakistan
 from app.services.locations import ancestor_ids, descendant_ids, location_path
 from app.services.ngo_sources import is_ngo_name, takes_goods
-from app.services.ngos import need_places, search_place
+from app.services.ngos import nearest_town, need_places, ngos_taking, search_place, served_ids, towns_with_ngos
 from app.services.sources.hapi_un import sector_categories
 
 GAP_KM = {LocationLevel.city: 30, LocationLevel.region: 30, LocationLevel.area: 10}
@@ -58,14 +59,9 @@ class NgoSpot:
 
 
 def covered(spot: NeedSpot, ngos: list[NgoSpot]) -> bool:
-    for n in ngos:
-        if n.categories and spot.category_id not in n.categories:
-            continue
-        if n.location_id in spot.inside:
-            return True
-        if spot.lat is not None and distance_km(spot.lat, spot.lng, n.lat, n.lng) <= spot.radius_km:
-            return True
-    return False
+    """Covered only by an NGO in the place (filed in it, inside it, or in the town it is part of) that takes the item.
+    No distance rule: Jamshoro with no NGO of its own is a gap, and its riders are pointed to Hyderabad meanwhile."""
+    return any(n.location_id in spot.inside and (not n.categories or spot.category_id in n.categories) for n in ngos)
 
 
 def gaps_of(spots: list[NeedSpot], ngos: list[NgoSpot], min_level: int = 2) -> list[NeedSpot]:
@@ -120,7 +116,7 @@ def find_gaps(db: Session, within: Optional[Any] = None, min_level: int = 2) -> 
         centre = next(((l.lat, l.lng) for l in (locs.get(i) for i in ancestor_ids(db, loc.id))
                        if l is not None and l.lat is not None and l.level != LocationLevel.province), (None, None))
         spots.append(NeedSpot(loc.id, nl.category_id, slugs.get(nl.category_id, ""), nl.level, nl.score, centre[0], centre[1],
-                              GAP_KM.get(loc.level, 30), set(descendant_ids(db, loc.id))))
+                              GAP_KM.get(loc.level, 30), served_ids(db, loc.id)))
     ngos = [NgoSpot(n.lat, n.lng, n.location_id, {c.id for c in n.categories})
             for n in db.scalars(select(Ngo).where(Ngo.is_active.is_(True))) if takes_goods(n.name, n.about, n.found_by)]
     return gaps_of(spots, ngos, min_level)
@@ -220,11 +216,11 @@ def for_alerts(db: Session, alert_id: Optional[Any] = None, use_ai: bool = True)
             if centre is None:
                 lines.append(f"{name}: no map position")
                 continue
-            inside = set(descendant_ids(db, city.id))
+            inside = served_ids(db, city.id)
+
             def known() -> int:
                 return sum(1 for n in db.scalars(select(Ngo).where(Ngo.is_active.is_(True)))
-                           if _takes_any(n, need_ids) and takes_goods(n.name, n.about, n.found_by) and (n.location_id in inside or
-                                                           distance_km(centre[0], centre[1], n.lat, n.lng) <= 30))
+                           if _takes_any(n, need_ids) and takes_goods(n.name, n.about, n.found_by) and n.location_id in inside)
             before = known()
             added = _osm(db, city, centre)
             for slug in now_slugs:
@@ -254,12 +250,11 @@ def for_place(db: Session, location_id: Any, category_id: int, use_ai: bool = Tr
     centre = ensure_centre(db, city)
     if centre is None:
         return f"We have no map position for {name}"
-    inside = set(descendant_ids(db, city.id))
+    inside = served_ids(db, city.id)
 
     def known() -> int:
         return sum(1 for n in db.scalars(select(Ngo).where(Ngo.is_active.is_(True)))
-                   if _takes_any(n, {category_id}) and takes_goods(n.name, n.about, n.found_by) and (n.location_id in inside or
-                                                        distance_km(centre[0], centre[1], n.lat, n.lng) <= 30))
+                   if _takes_any(n, {category_id}) and takes_goods(n.name, n.about, n.found_by) and n.location_id in inside)
     before = known()
     added = _osm(db, city, centre) + _from_3w(db, location_id, slug, city, centre)
     note = ""
@@ -270,18 +265,37 @@ def for_place(db: Session, location_id: Any, category_id: int, use_ai: bool = Tr
         except (llm.LLMError, ValueError) as e:
             note = f" Web search failed: {str(e)[:120]}"
     after = known()
-    return (f"{name}: {after} NGOs we know take {item} or everything ({before} before, {added} added from "
-            f"OpenStreetMap, OCHA 3W{' and the web' if 'done' in note else ''}).{note}"
-            + ("" if after else " None yet: add one you know on the NGOs page."))
+    line = (f"{name}: {after} NGOs we know in {name} take {item} or everything ({before} before, {added} added from "
+            f"OpenStreetMap, OCHA 3W{' and the web' if 'done' in note else ''}).{note}")
+    return line + ("" if after else " " + _nearest_city_line(db, city, category_id, item))
+
+
+def _nearest_city_line(db: Session, place: Location, category_id: int, item: str) -> str:
+    """No NGO in the place: point to the nearest town with NGOs that take the item (Jamshoro -> Hyderabad). If no town
+    has any yet, search the nearest city on OpenStreetMap first."""
+    towns = towns_with_ngos(db, ngos_taking(db, category_id))
+    hit = nearest_town(db, place.id, towns)
+    if hit is None:
+        centre = ensure_centre(db, place)
+        cities = [c for c in db.scalars(select(Location).where(Location.level == LocationLevel.city, Location.lat.is_not(None)))
+                  if c.id != place.id]
+        if centre is not None and cities:
+            city = min(cities, key=lambda c: distance_km(centre[0], centre[1], c.lat, c.lng))
+            _osm(db, city, (city.lat, city.lng))
+            hit = nearest_town(db, place.id, towns_with_ngos(db, ngos_taking(db, category_id)))
+    if hit is None:
+        return "No town near it has an NGO for this yet: add one you know on the NGOs page."
+    town = db.get(Location, hit[0])
+    return f"Until one is found, riders can drop {item} in {town.name} ({round(hit[1])} km away)."
 
 
 def _for_places(db: Session, province: Location, cat: Category, use_ai: bool) -> str:
-    """A province: search NGOs around each place in it that needs the item and has none within 30 km, highest need
+    """A province: search NGOs around each place in it that needs the item and has no NGO of its own, highest need
     first (Mirpur Khas, Badin, Jacobabad... not just the provincial capital). OpenStreetMap and OCHA 3W for each, then
     a web search for those still empty (at most NGO_AI_SEARCHES_PER_RUN)."""
-    places = [p for p in need_places(db, province.id, cat.id) if p["ngos"] == []][:MAX_CITIES]
+    places = [p for p in need_places(db, province.id, cat.id) if not any(n["reachable"] for n in p["ngos"])][:MAX_CITIES]
     if not places:
-        return f"Every place in {province.name} that needs {cat.name.lower()} already has an NGO within 30 km."
+        return f"Every place in {province.name} that needs {cat.name.lower()} already has an NGO of its own."
     ai_left = settings.NGO_AI_SEARCHES_PER_RUN if (use_ai and llm.available()) else 0
     found, empty, notes = [], [], []
     for p in places:
@@ -299,13 +313,18 @@ def _for_places(db: Session, province: Location, cat: Category, use_ai: bool) ->
                 notes.append(f"{city.name}: web search failed ({str(e)[:60]})")
                 ai_left = 0 if getattr(e, "out_of_credit", False) else ai_left
         (found if added else empty).append(f"{city.name} (+{added})" if added else city.name)
-    left = len([p for p in need_places(db, province.id, cat.id) if p["ngos"] == []])
+    after = need_places(db, province.id, cat.id)
+    left = len([p for p in after if not any(n["reachable"] for n in p["ngos"])])
+    use = [f"{p['place']} -> {p['fallback']['town']} ({p['fallback']['km']} km)" for p in after
+           if p["place"] in empty and p["fallback"]]
+    if use:
+        notes.insert(0, "Until NGOs are found there, riders use the nearest town: " + ", ".join(use))
     parts = [f"Searched {len(places)} places in {province.name} that need {cat.name.lower()}"]
     if found:
         parts.append("found NGOs in " + ", ".join(found))
     if empty:
         parts.append("nothing new in " + ", ".join(empty))
-    parts.append(f"{left} places still have no NGO within 30 km" if left else "every place now has an NGO within 30 km")
+    parts.append(f"{left} places still have no NGO of their own" if left else "every place now has an NGO of its own")
     return "; ".join(parts) + "." + (" " + "; ".join(notes) if notes else "")
 
 
