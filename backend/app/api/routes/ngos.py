@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,7 +16,7 @@ from app.db.session import get_db
 from app.models import Category, Location, Ngo, User
 from app.models.enums import Role, SourceKind
 from app.schemas.ngos import NgoIn, NgoOsmOut, NgoOut, NgoSearchIn, NgoSearchOut, NgoUpdate
-from app.services import llm, ngo_finder, ngo_sources
+from app.services import llm, ngo_finder, ngo_import, ngo_sources
 from app.services.sources import ngo_gaps
 from app.services.sources.runner import run_source
 from app.services.locations import descendant_ids
@@ -69,6 +69,28 @@ def for_need(location_id: uuid.UUID, category_id: int, _: User = Depends(admin_o
     if db.get(Location, location_id) is None:
         raise api_error(404, "location_not_found", "Place not found")
     return ngos_for_need(db, location_id, category_id)
+
+
+@router.post("/import")
+def import_list(file: UploadFile = File(...), _: User = Depends(admin_only), db: Session = Depends(get_db)):
+    """A list of NGOs the admin collected (CSV or Excel): name, district(s), and optional address, phone, website,
+    email, items they take. Each NGO is saved in every district it works in. Districts not on the map yet are looked
+    up on OpenStreetMap, so a long list takes a little while."""
+    from app.services.deprivation import read_rows
+    name = file.filename or "ngos.csv"
+    if not name.lower().endswith((".csv", ".txt", ".xlsx", ".xlsm")):
+        raise api_error(422, "bad_file", "Upload a CSV or an Excel (.xlsx) file")
+    raw = file.file.read(2_000_001)
+    if len(raw) > 2_000_000:
+        raise api_error(413, "too_big", "Lists up to 2 MB")
+    try:
+        rows, problems = ngo_import.parse_rows(read_rows(raw, name))
+    except Exception:
+        raise api_error(422, "unreadable", "Could not read this file. Save it as .xlsx or .csv and try again.")
+    if not rows:
+        raise api_error(422, "no_rows", "; ".join(problems[:3]) or "No NGOs found in the file")
+    result = ngo_import.save(db, rows)
+    return {**result, "problems": (problems + result["problems"])[:30]}
 
 
 @router.get("/by-place")

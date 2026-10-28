@@ -484,7 +484,7 @@ type NeedNgo = {
   registration: string | null; location_approx: boolean; lat: number; lng: number; found_by: string;
 };
 
-const FOUND_BY: Record<string, string> = { web_search: "Web search", openstreetmap: "OpenStreetMap", ocha_3w: "OCHA 3W", admin: "Added by admin" };
+const FOUND_BY: Record<string, string> = { web_search: "Web search", openstreetmap: "OpenStreetMap", ocha_3w: "OCHA 3W", admin: "Added by admin", import: "Imported list" };
 
 const addLink = (pl: { place_id: string; path: string[]; lat: number | null; lng: number | null }, categoryId: number) => {
   const q = new URLSearchParams({ add: pl.place_id, path: pl.path.join("|"), cat: String(categoryId) });
@@ -512,7 +512,8 @@ function NgoRow({ n, cell, far = false }: { n: NeedNgo; cell: { padding: string;
         {!sourceInAbout && <div className="muted small">{FOUND_BY[n.found_by] ?? n.found_by}</div>}
       </td>
       <td style={{ ...cell, minWidth: 170 }}>
-        {n.location_approx ? <span style={{ color: "var(--warn)" }}>{n.city}: address not known yet</span> : n.address}
+        {n.location_approx && /not known/.test(n.address) ? <span style={{ color: "var(--warn)" }}>{n.city}: address not known yet</span> : n.address}
+        {n.location_approx && !/not known/.test(n.address) && <div className="small" style={{ color: "var(--warn)" }}>Pin at the town centre</div>}
         <div className="muted small">{n.city}{n.distance_km !== null ? ` · ${n.distance_km} km` : ""}</div>
       </td>
       <td style={{ ...cell, whiteSpace: "nowrap" }}>

@@ -123,3 +123,36 @@ def test_province_need_shows_ngos_per_place_and_searches_each_place(client, db, 
         db.execute(delete(Ngo).where(Ngo.name.in_(["Karachi Blanket Bank", "Larkana Blanket Bank", "Sukkur Welfare Society"])))
         db.execute(delete(NeedLevel).where(NeedLevel.id == need.id))
         db.commit()
+
+
+def test_import_ngo_list(client, db):
+    """An admin's list: one NGO in several cities is saved in each; a new district is added under its province; an
+    NGO we already have in a city gets the missing phone instead of a copy."""
+    from tests.test_donations_api import make_ngo
+
+    admin_h = admin_headers(client, db)
+    make_ngo(client, admin_h, db, name="Saylani Welfare Trust - Test Branch", where="Hyderabad", lat=25.39, lng=68.36, category_ids=[1], phone=None)
+    csv_text = ("NGO name,District,Province,Phone,Takes,Lat,Lng\n"
+                "Test Rural Support Programme,Hyderabad; Sukkur,Sindh,,Food; Grocery / ration,,\n"
+                "Saylani Welfare International Trust,Hyderabad,Sindh,021 111 729 526,,,\n"
+                "Testabad Relief Society,Testabad,Sindh,0300-0000000,Blankets,26.73,67.78\n")
+    try:
+        r = client.post(f"{API}/admin/ngos/import", headers=admin_h,
+                        files={"file": ("ngos.csv", csv_text.encode(), "text/csv")})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["added"] == 3 and body["updated"] == 1, body
+        trsp = list(db.scalars(select(Ngo).where(Ngo.name == "Test Rural Support Programme")))
+        assert len(trsp) == 2 and all(n.location_approx and n.found_by == "import" for n in trsp)
+        assert {c.slug for c in trsp[0].categories} == {"food", "grocery_ration"}
+        saylani = db.scalar(select(Ngo).where(Ngo.name == "Saylani Welfare Trust - Test Branch"))
+        db.refresh(saylani)
+        assert saylani.phone == "021 111 729 526"
+        new = db.scalar(select(Ngo).where(Ngo.name == "Testabad Relief Society"))
+        assert not new.location_approx and new.lat == 26.73
+    finally:
+        db.execute(delete(Ngo).where(Ngo.name.in_(["Test Rural Support Programme", "Saylani Welfare Trust - Test Branch",
+                                                  "Testabad Relief Society"])))
+        from app.models import Location
+        db.execute(delete(Location).where(Location.name == "Testabad"))
+        db.commit()

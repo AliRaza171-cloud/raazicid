@@ -31,6 +31,7 @@ export default function Ngos() {
   const [searchCat, setSearchCat] = useState("");
   const [searching, setSearching] = useState(false);
   const [mapping, setMapping] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
 
@@ -81,6 +82,25 @@ export default function Ngos() {
     }
   };
 
+  const importList = async (file: File | undefined) => {
+    if (!file) return;
+    setImporting(true);
+    setError(null);
+    setFlash(null);
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const r = await api<{ ngos: number; added: number; updated: number; problems: string[] }>("/admin/ngos/import", { method: "POST", body: form });
+      setFlash(`Imported ${r.ngos} NGOs: ${r.added} added to their districts, ${r.updated} already known and filled in.`
+        + (r.problems.length ? ` Check: ${r.problems.join("; ")}` : ""));
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const saved = (n: Ngo, created: boolean) => {
     setFlash(created ? `Added ${n.name}` : `Saved ${n.name}`);
     setEditing({ mode: "edit", ngo: n });
@@ -90,6 +110,12 @@ export default function Ngos() {
   return (
     <>
       <PageHeader title="NGOs" sub="NGOs, charities and welfare trusts where our riders drop donations. They give the items to people in need.">
+        <label className="btn ghost" style={{ cursor: importing ? "wait" : "pointer", margin: 0 }}
+          title="CSV or Excel with columns: name, district (several with ;), province, address, phone, website, email, takes, about">
+          {importing ? "Importing… (districts are put on the map)" : "Import a list"}
+          <input type="file" accept=".csv,.txt,.xlsx,.xlsm" hidden disabled={importing}
+            onChange={(e) => { importList(e.target.files?.[0]); e.target.value = ""; }} />
+        </label>
         <button className="btn" onClick={() => setEditing({ mode: "new" })}>+ Add an NGO</button>
       </PageHeader>
       <main className="page">
@@ -164,7 +190,7 @@ export default function Ngos() {
                         <div className="muted small" style={{ marginTop: 3 }}>{n.items_30d} donations / 30 days</div>
                       </td>
                       <td className="small">
-                        {n.found_by === "web_search" ? "Web search" : n.found_by === "openstreetmap" ? "OpenStreetMap" : n.found_by === "ocha_3w" ? "OCHA 3W" : "Added by admin"}
+                        {n.found_by === "web_search" ? "Web search" : n.found_by === "openstreetmap" ? "OpenStreetMap" : n.found_by === "ocha_3w" ? "OCHA 3W" : n.found_by === "import" ? "Imported list" : "Added by admin"}
                         {n.source_url && <div><a href={n.source_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Source</a></div>}
                       </td>
                     </tr>
@@ -271,6 +297,12 @@ function NgoPanel({ editing, cats, onClose, onSaved }: {
         <div className="flash" style={{ background: "var(--info-bg)", color: "var(--info)" }}>
           Found in OCHA's who-works-where (3W) data for a place in need. 3W does not give office addresses: search the web
           or call them to find their office in this city, and ask if they take donated items.
+        </div>
+      )}
+      {start?.found_by === "import" && (
+        <div className="flash" style={{ background: "var(--info-bg)", color: "var(--info)" }}>
+          From a list you imported. It is saved in each district it works in: call them to find the office here and
+          ask which items they take.
         </div>
       )}
       {start?.location_approx && (

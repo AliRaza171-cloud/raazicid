@@ -325,6 +325,7 @@ export default function DonationDetail() {
                             {o.found_by === "web_search" && <span className="chip wait" title="Found by web search: call them first">From the web</span>}
                             {o.found_by === "openstreetmap" && <span className="chip wait" title="Found on OpenStreetMap: call them first">From the map</span>}
                             {o.found_by === "ocha_3w" && <span className="chip wait" title="From OCHA 3W: office address not known, call them first">From OCHA 3W</span>}
+                            {o.found_by === "import" && <span className="chip wait" title="From your imported list: call them first">From your list</span>}
                             {o.phone_confirmed && o.ban_checked
                               ? <span className="chip ok">✓ Checked</span>
                               : <span className="chip" style={{ background: "var(--warn-bg)", color: "var(--warn)" }}>{!o.ban_checked ? "Banned lists not checked" : "Not called yet"}</span>}
