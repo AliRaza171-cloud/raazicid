@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { PageHeader, ComingIn } from "../components/Layout";
-import { api, API_URL, type AiStats, type AiStatus, type Category, type LocationItem } from "../lib/api";
+import { api, API_URL, type Category, type LocationItem } from "../lib/api";
 
-type Health = { status: string; database?: string; pgvector?: boolean };
+type Health = { status: string; database?: string };
 
 /** Phase 1: proves the web app can talk to the backend and the database. */
 export default function Dashboard() {
@@ -12,9 +11,6 @@ export default function Dashboard() {
   const [cats, setCats] = useState<Category[]>([]);
   const [provinces, setProvinces] = useState<LocationItem[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [ai, setAi] = useState<AiStatus | null>(null);
-  const [aiStats, setAiStats] = useState<AiStats | null>(null);
-  const [waiting, setWaiting] = useState(0);
 
   useEffect(() => {
     api<Health>("/health")
@@ -25,9 +21,6 @@ export default function Dashboard() {
       .catch((e) => setError(String(e.message ?? e)));
     api<Category[]>("/categories").then(setCats).catch(() => undefined);
     api<LocationItem[]>("/locations").then(setProvinces).catch(() => undefined);
-    api<AiStatus>("/ai/status").then(setAi).catch(() => undefined);
-    api<AiStats>("/admin/ai/stats").then(setAiStats).catch(() => undefined);
-    api<Record<string, number>>("/admin/alerts/counts").then((c) => setWaiting(c.unconfirmed ?? 0)).catch(() => undefined);
   }, []);
 
   const chip = (ok: boolean | null) =>
@@ -37,12 +30,6 @@ export default function Dashboard() {
     <>
       <PageHeader title="Dashboard" sub="Phase 1 setup check: is everything connected?" />
       <main className="page">
-        {waiting > 0 && (
-          <div className="flash" style={{ background: "var(--warn-bg)", color: "var(--warn)", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{ marginRight: "auto" }}>{waiting} disaster alert{waiting > 1 ? "s" : ""} found automatically, waiting to be checked.</span>
-            <Link className="btn small" to="/disasters">Check now</Link>
-          </div>
-        )}
         <section className="grid-kpi">
           <div className="card">
             <div className="kpi-label">Backend API</div>
@@ -52,10 +39,6 @@ export default function Dashboard() {
           <div className="card">
             <div className="kpi-label">Database (Neon)</div>
             <div style={{ marginTop: 8 }}>{chip(db ? db.database === "reachable" : error ? false : null)}</div>
-          </div>
-          <div className="card">
-            <div className="kpi-label">pgvector (for RAG)</div>
-            <div style={{ marginTop: 8 }}>{chip(db ? Boolean(db.pgvector) : error ? false : null)}</div>
           </div>
           <div className="card">
             <div className="kpi-label">Seed data</div>
@@ -74,37 +57,7 @@ export default function Dashboard() {
             </div>
           </section>
         )}
-        <section className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <h2 style={{ margin: 0, fontSize: 16 }}>AI</h2>
-          <div className="grid-kpi">
-            <div>
-              <div className="kpi-label">Photo classifier</div>
-              <div style={{ marginTop: 6 }}>
-                {ai === null ? <span className="chip wait">Checking</span>
-                  : ai.classifier === "ready" ? <span className="chip ok">Ready</span>
-                  : <span className="chip warn">{ai.classifier === "not_installed" ? "PyTorch not installed" : "Model files missing"}</span>}
-              </div>
-              {ai?.version && <div className="muted small" style={{ marginTop: 6 }}>{ai.version}</div>}
-            </div>
-            <div>
-              <div className="kpi-label">Test accuracy</div>
-              <div className="kpi-value">{ai?.accuracy != null ? `${Math.round(ai.accuracy * 100)}%` : "–"}</div>
-              <div className="muted small">Open Images test photos{ai?.own_photo_accuracy != null ? ` · own photos ${Math.round(ai.own_photo_accuracy * 100)}%` : ""}</div>
-            </div>
-            <div>
-              <div className="kpi-label">Donors kept the AI's choice</div>
-              <div className="kpi-value">{aiStats?.top1_rate != null ? `${Math.round(aiStats.top1_rate * 100)}%` : "–"}</div>
-              <div className="muted small">
-                {aiStats ? `${aiStats.top1_kept} of ${aiStats.donations_with_ai} real donations · in top 3: ${aiStats.top3_rate != null ? Math.round(aiStats.top3_rate * 100) + "%" : "–"}` : ""}
-              </div>
-            </div>
-            <div>
-              <div className="kpi-label">AI document check</div>
-              <div style={{ marginTop: 6 }}>{ai === null ? <span className="chip wait">Checking</span> : ai.document_review ? <span className="chip ok">Ready</span> : <span className="chip warn">Add an AI key (OPENAI_API_KEY)</span>}</div>
-            </div>
-          </div>
-        </section>
-        <ComingIn phase={8} what="KPI cards, the needs-your-action queue, seasonal panel, need hotspots and charts." />
+        <ComingIn phase={8} what="KPI cards, the needs-your-action queue and charts." />
       </main>
     </>
   );

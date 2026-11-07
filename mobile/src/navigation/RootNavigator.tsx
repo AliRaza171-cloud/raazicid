@@ -8,13 +8,11 @@ import { colors } from "../theme";
 
 import LoginScreen from "../screens/auth/LoginScreen";
 import SignupScreen from "../screens/auth/SignupScreen";
-import AlertsScreen from "../screens/donor/AlertsScreen";
 import DonateDetailsScreen from "../screens/donor/DonateDetailsScreen";
 import DonationDetailScreen from "../screens/donor/DonationDetailScreen";
 import DonateScreen from "../screens/donor/DonateScreen";
 import DonationsScreen from "../screens/donor/DonationsScreen";
 import HomeScreen from "../screens/donor/HomeScreen";
-import NeedsScreen from "../screens/donor/NeedsScreen";
 import TrackingScreen from "../screens/donor/TrackingScreen";
 import ProfileScreen from "../screens/ProfileScreen";
 import ActiveJobScreen from "../screens/rider/ActiveJobScreen";
@@ -39,7 +37,6 @@ function DonorTabs() {
       <Tab.Screen name="Home" component={HomeScreen} options={tabOptions("home-outline", "Home")} />
       <Tab.Screen name="Donate" component={DonateScreen} options={tabOptions("add-circle-outline", "Donate")} />
       <Tab.Screen name="Donations" component={DonationsScreen} options={tabOptions("cube-outline", "Donations")} />
-      <Tab.Screen name="Alerts" component={AlertsScreen} options={tabOptions("notifications-outline", "Alerts")} />
       <Tab.Screen name="Profile" component={ProfileScreen} options={tabOptions("person-outline", "Profile")} />
     </Tab.Navigator>
   );
@@ -101,7 +98,6 @@ export default function RootNavigator() {
       <Stack.Screen name="DonateDetails" component={DonateDetailsScreen} options={{ title: "New donation" }} />
       <Stack.Screen name="DonationDetail" component={DonationDetailScreen} options={{ title: "Donation" }} />
       <Stack.Screen name="Tracking" component={TrackingScreen} options={{ title: "Live tracking" }} />
-      <Stack.Screen name="Needs" component={NeedsScreen} options={{ title: "What is needed where" }} />
     </Stack.Navigator>
   );
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { PageHeader } from "../components/Layout";
-import { api, type Category, type Donation, type NgoOption, type NgoSearch, type RiderOption } from "../lib/api";
+import { api, type Donation, type NgoOption, type RiderOption } from "../lib/api";
 import { STATUS, dateTime, urgencyChip, windowText } from "../lib/format";
 
 const PROOF = { pickup_proof: "Pickup", delivery_proof: "Handed to the NGO" } as const;
@@ -19,7 +19,6 @@ export default function DonationDetail() {
   const [d, setD] = useState<Donation | null>(null);
   const [options, setOptions] = useState<NgoOption[] | null>(null);
   const [ngoId, setNgoId] = useState<string>("");
-  const [searching, setSearching] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -27,7 +26,6 @@ export default function DonationDetail() {
   const [flash, setFlash] = useState<string | null>(null);
   const [zoom, setZoom] = useState<string | null>(null);
   const [riders, setRiders] = useState<RiderOption[] | null>(null);
-  const [catNames, setCatNames] = useState<Record<number, string>>({});
   const [riderId, setRiderId] = useState("");
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
@@ -58,7 +56,6 @@ export default function DonationDetail() {
 
   useEffect(load, [load]);
   useEffect(() => {
-    api<Category[]>("/categories").then((cs) => setCatNames(Object.fromEntries(cs.map((c) => [c.id, c.name])))).catch(() => undefined);
   }, []);
 
   const accept = async () => {
@@ -115,23 +112,7 @@ export default function DonationDetail() {
     });
 
   const city = d ? d.pickup.location_path[Math.min(1, d.pickup.location_path.length - 1)] : "";
-  const searchWeb = async () => {
-    if (!d) return;
-    setSearching(true);
-    setError(null);
-    try {
-      // the pickup's city: the backend widens an area or district to its city
-      const r = await api<NgoSearch>("/admin/ngos/search", { method: "POST", body: JSON.stringify({ location_id: d.pickup.location_id, category_id: d.category.id }) });
-      setFlash(r.status);
-      const opts = await api<NgoOption[]>(`/admin/donations/${id}/ngo-options`);
-      setOptions(opts);
-      setNgoId(opts[0]?.id ?? "");
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSearching(false);
-    }
-  };
+
 
   if (!d) {
     return (
@@ -171,17 +152,6 @@ export default function DonationDetail() {
                 ))}
               </div>
               <dl style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: "8px 16px", margin: 0, fontSize: 14 }}>
-                {d.ai && (
-                  <>
-                    <dt className="muted">AI category</dt>
-                    <dd style={{ margin: 0 }}>
-                      {d.ai.top3.map((t) => `${catNames[t.category_id] ?? t.category_id} ${Math.round(t.p * 100)}%`).join(" · ")}
-                      <div className={`small ${d.ai.category_id === d.category.id ? "muted" : ""}`} style={d.ai.category_id === d.category.id ? undefined : { color: "var(--warn)", fontWeight: 700 }}>
-                        {d.ai.category_id === d.category.id ? `Donor confirmed ${d.category.name}.` : `Donor chose ${d.category.name} instead.`}
-                      </div>
-                    </dd>
-                  </>
-                )}
                 <dt className="muted">Quantity</dt>
                 <dd style={{ margin: 0 }}>{d.quantity}</dd>
                 {d.is_food ? (
@@ -296,13 +266,13 @@ export default function DonationDetail() {
               <>
                 <div>
                   <h2 style={{ margin: 0, fontSize: 16 }}>Which NGO should get it?</h2>
-                  <p className="muted small" style={{ margin: "4px 0 0" }}>Our rider picks it up and drops it at the NGO. NGOs that take {d.category.name.toLowerCase()}{d.food_type === "cooked" ? " and cooked food" : ""}: those working where a disaster needs this item first, then checked ones, then nearest.</p>
+                  <p className="muted small" style={{ margin: "4px 0 0" }}>Our rider picks it up and drops it at the NGO. NGOs that take {d.category.name.toLowerCase()}{d.food_type === "cooked" ? " and cooked food" : ""}: same area or city first, then checked ones, then nearest.</p>
                 </div>
                 {options === null ? (
                   <p className="muted">Loading NGOs…</p>
                 ) : options.length === 0 ? (
                   <div className="flash bad">
-                    We know no NGO near {city} that takes this{d.food_type === "cooked" ? " cooked food" : ""}. Search the web, or <Link to="/ngos">add one you know</Link>.
+                    We know no NGO near {city} that takes this{d.food_type === "cooked" ? " cooked food" : ""}. <Link to="/ngos">Add one you know</Link>.
                   </div>
                 ) : (
                   <div role="radiogroup" aria-label="NGO" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -322,25 +292,15 @@ export default function DonationDetail() {
                             <span className={`chip ${o.match === "same_area" || o.match === "same_city" ? "ok" : "wait"}`}>{MATCH[o.match]}</span>
                             <span className="chip wait">{o.location_approx ? "distance not known" : `${o.distance_km} km`}</span>
                             <span className="chip wait">{o.items_30d} donations / 30 days</span>
-                            {o.found_by === "web_search" && <span className="chip wait" title="Found by web search: call them first">From the web</span>}
-                            {o.found_by === "openstreetmap" && <span className="chip wait" title="Found on OpenStreetMap: call them first">From the map</span>}
-                            {o.found_by === "ocha_3w" && <span className="chip wait" title="From OCHA 3W: office address not known, call them first">From OCHA 3W</span>}
-                            {o.found_by === "import" && <span className="chip wait" title="From your imported list: call them first">From your list</span>}
                             {o.phone_confirmed && o.ban_checked
                               ? <span className="chip ok">✓ Checked</span>
                               : <span className="chip" style={{ background: "var(--warn-bg)", color: "var(--warn)" }}>{!o.ban_checked ? "Banned lists not checked" : "Not called yet"}</span>}
                           </span>
-                          {o.disaster && <span className="small" style={{ display: "block", marginTop: 4, color: "var(--urgent)", fontWeight: 700 }}>{o.disaster}</span>}
-                          {o.works_text && <span className="small" style={{ display: "block", marginTop: 2, color: "var(--info)" }}>{o.works_text}</span>}
-                          {o.source_url && <a className="small" href={o.source_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Where we found it</a>}
                         </span>
                       </label>
                     ))}
                   </div>
                 )}
-                <button className="btn ghost" disabled={searching} onClick={searchWeb}>
-                  {searching ? `Searching the web for NGOs in ${city}… (1–3 min)` : `Search the web for NGOs in ${city}`}
-                </button>
                 <button className="btn" disabled={busy || !ngoId} onClick={accept}>
                   {busy && !rejecting ? "Saving…" : "Accept and send to this NGO"}
                 </button>

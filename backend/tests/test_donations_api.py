@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from app.models import Location, Ngo, Notification
+from app.models import Location, Notification
 from tests.test_auth_api import API, auth, make_admin, register
 
 
@@ -38,7 +38,7 @@ def make_ngo(client, admin_h, db, name="Noor Welfare Trust", where="Lyari", **ex
     return r.json()
 
 
-def test_ngos_crud_access_and_web_search(client, db, monkeypatch):
+def test_ngos_crud_and_access(client, db):
     admin_h = admin_headers(client, db)
     n = make_ngo(client, admin_h, db, category_ids=[3, 4], website="noortrust.org")
     assert n["location_path"][-1] == "Lyari" and [c["id"] for c in n["categories"]] == [3, 4]
@@ -65,29 +65,6 @@ def test_ngos_crud_access_and_web_search(client, db, monkeypatch):
     assert client.get(f"{API}/admin/ngos", headers=donor_h).status_code == 403
     rider_h = auth(register(client, role="rider").json()["access_token"])
     assert client.get(f"{API}/admin/ngos", headers=rider_h).status_code == 403
-
-    # Web search for NGOs in Hyderabad (the AI and the map lookup are stand-ins: tests never call paid APIs)
-    from app.services import llm, ngo_finder
-    answer = """```json
-{"ngos": [{"name": "Hyderabad Welfare Trust", "address": "Latifabad Unit 7", "phone": "022-1234567",
-  "website": "hwt.org.pk", "accepts": ["clothes", "blankets", "spaceships"], "cooked_food": false,
-  "about": "Helps poor families.", "source_url": "https://hwt.org.pk/about"},
- {"name": "Sindh Food Bank", "address": "", "accepts": ["food"], "cooked_food": true, "source_url": "https://x.pk"}]}
-```"""
-    monkeypatch.setattr(llm, "available", lambda: True)
-    monkeypatch.setattr(llm, "complete", lambda *a, **k: llm.Answer(text=answer, provider="openai", model="test"))
-    monkeypatch.setattr(ngo_finder, "geocode", lambda address, city, centre: (25.39, 68.37) if "Latifabad" in address else None)
-    r = client.post(f"{API}/admin/ngos/search", headers=admin_h, json={"location_id": area(db, "Hyderabad")})
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["place"] == "Hyderabad" and body["found"] == 2 and body["added"] == 2
-    by = {x["name"]: x for x in body["ngos"]}
-    trust, bank = by["Hyderabad Welfare Trust"], by["Sindh Food Bank"]
-    assert trust["found_by"] == "web_search" and not trust["location_approx"] and [c["id"] for c in trust["categories"]] == [3, 4]
-    assert bank["location_approx"] and bank["takes_cooked_food"] and "call first" in bank["address"]
-    # Searching again does not add the same NGOs twice
-    again = client.post(f"{API}/admin/ngos/search", headers=admin_h, json={"location_id": area(db, "Hyderabad")}).json()
-    assert again["added"] == 0 and len([x for x in again["ngos"] if x["name"] == "Hyderabad Welfare Trust"]) == 1
 
 
 def test_donation_flow_accept(client, db):
@@ -178,16 +155,10 @@ def test_food_urgency_reject_and_validation(client, db):
     assert client.post(f"{API}/donations", headers=donor_h, json=unknown).status_code == 422
 
 
-def test_ngo_checks_3w_disaster_ranking_and_osm(client, db, monkeypatch):
-    from datetime import date
-
-    from app.models import NeedIndicator, Source
-    from app.models.enums import SourceKind
-    from app.services import ngo_sources
-
+def test_ngo_checks_and_drop_off_options(client, db):
     admin_h = admin_headers(client, db)
     plain = make_ngo(client, admin_h, db, name="Saddar Plain Trust", where="Saddar", lat=24.856, lng=67.021)
-    nrc = make_ngo(client, admin_h, db, name="Norwegian Refugee Council", where="Saddar", lat=24.857, lng=67.022)
+    far = make_ngo(client, admin_h, db, name="Hyderabad Blanket Trust", where="Hyderabad", lat=25.396, lng=68.358)
 
     # Checks: ticked with today's date, and cleared again
     ok = client.patch(f"{API}/admin/ngos/{plain['id']}", headers=admin_h,
@@ -197,46 +168,11 @@ def test_ngo_checks_3w_disaster_ranking_and_osm(client, db, monkeypatch):
     assert cleared["phone_confirmed_at"] is None and cleared["ban_checked_at"]
     client.patch(f"{API}/admin/ngos/{plain['id']}", headers=admin_h, json={"phone_confirmed": True})
 
-    # OCHA 3W says NRC works on shelter in Karachi South; a flood in Lyari (inside it) needs blankets
-    sid = db.scalar(select(Source.id).where(Source.kind == SourceKind.hdx_hapi))
-    w3 = NeedIndicator(location_id=uuid.UUID(area(db, "Karachi South")), indicator="orgs_present", value=1, source_id=sid,
-                       period_end=date(2025, 12, 31), meta={"sectors": {"Shelter": ["NRC"]}, "names": {"NRC": "Norwegian Refugee Council"}})
-    db.add(w3)
-    db.commit()
-    alert = client.post(f"{API}/admin/alerts", headers=admin_h, json={
-        "type": "flood", "severity": "severe", "title": "Flood in Lyari", "location_ids": [area(db, "Lyari")], "figures": {}}).json()
-    try:
-        listed = {n["name"]: n for n in client.get(f"{API}/admin/ngos", headers=admin_h, params={"q": "Norwegian"}).json()}
-        assert listed["Norwegian Refugee Council"]["works_text"].startswith("Works on Shelter in Karachi South (OCHA 3W")
-
-        donor_h = auth(register(client).json()["access_token"])
-        d = client.post(f"{API}/donations", headers=donor_h, json=donation_body(db)).json()   # 10 blankets from Saddar
-        opts = client.get(f"{API}/admin/donations/{d['id']}/ngo-options", headers=admin_h).json()
-        assert opts[0]["id"] == nrc["id"] and "Flood in Lyari" in opts[0]["disaster"]   # works where the flood needs blankets
-        plain_opt = next(o for o in opts if o["id"] == plain["id"])
-        assert plain_opt["phone_confirmed"] and plain_opt["ban_checked"] and plain_opt["disaster"] is None
-
-        # The alert lists NGOs near it, the one working there first
-        near = client.get(f"{API}/admin/alerts/{alert['id']}", headers=admin_h).json()["ngos"]
-        assert near[0]["name"] == "Norwegian Refugee Council" and near[0]["active_here"] and "OCHA 3W" in near[0]["why"]
-
-        # OpenStreetMap: one office we knew only by city gets its pin, one new office is added (stand-in for Overpass)
-        hyd = area(db, "Hyderabad")
-        approx = make_ngo(client, admin_h, db, name="Latifabad Welfare Society", where="Hyderabad", lat=25.396, lng=68.358)
-        row = db.get(Ngo, uuid.UUID(approx["id"]))
-        row.location_approx = True
-        db.commit()
-        monkeypatch.setattr(ngo_sources, "osm_offices", lambda lat, lng, radius: [
-            {"name": "Latifabad Welfare Society", "lat": 25.381, "lng": 68.371, "address": "Unit 7", "phone": None,
-             "website": None, "kind": "ngo", "url": "https://www.openstreetmap.org/node/1"},
-            {"name": "Darul Aman Hyderabad", "lat": 25.40, "lng": 68.36, "address": None, "phone": "022-111", "website": None,
-             "kind": "shelter", "url": "https://www.openstreetmap.org/way/2"}])
-        r = client.post(f"{API}/admin/ngos/osm", headers=admin_h, json={"location_id": hyd})
-        assert r.status_code == 200, r.text
-        assert r.json()["added"] == 1 and r.json()["located"] == 1
-        by = {n["name"]: n for n in r.json()["ngos"]}
-        assert by["Darul Aman Hyderabad"]["found_by"] == "openstreetmap" and not by["Latifabad Welfare Society"]["location_approx"]
-    finally:
-        client.post(f"{API}/admin/alerts/{alert['id']}/status", headers=admin_h, json={"status": "handled"})
-        db.delete(db.get(NeedIndicator, w3.id))
-        db.commit()
+    # Drop-off options for 10 blankets from Saddar: the NGO in the same area first, the other city later
+    donor_h = auth(register(client).json()["access_token"])
+    d = client.post(f"{API}/donations", headers=donor_h, json=donation_body(db)).json()
+    opts = client.get(f"{API}/admin/donations/{d['id']}/ngo-options", headers=admin_h).json()
+    ids = [o["id"] for o in opts]
+    assert ids.index(plain["id"]) < ids.index(far["id"])
+    first = next(o for o in opts if o["id"] == plain["id"])
+    assert first["match"] == "same_area" and first["phone_confirmed"] and first["ban_checked"]

@@ -8,23 +8,12 @@ const groups: { label: string; items: Item[] }[] = [
     label: "Operations",
     items: [
       { to: "/", label: "Dashboard" },
-      { to: "/disasters", label: "Disaster alerts" },
       { to: "/donations", label: "Donations" },
       { to: "/tracking", label: "Live tracking" },
       { to: "/riders", label: "Riders" },
       { to: "/ngos", label: "NGOs" },
     ],
   },
-  {
-    label: "Planning",
-    items: [
-      { to: "/needs", label: "Needs by area" },
-      { to: "/need-finder", label: "Need finder" },
-      { to: "/reports", label: "Report library" },
-      { to: "/seasonal", label: "Seasonal planner" },
-    ],
-  },
-  { label: "Trust", items: [{ to: "/flags", label: "Fraud flags" }] },
 ];
 
 export default function Sidebar() {

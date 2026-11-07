@@ -16,7 +16,6 @@ from app.models.enums import RiderStatus, Role
 from app.schemas.auth import RiderDocOut
 from app.schemas.riders import AiCheck, AiReview, DecisionIn, RiderCounts, RiderDetail, RiderList, RiderListItem
 from app.services.accounts import notify
-from app.services.doc_review import ReviewError, review_documents
 from app.services.locations import location_path
 
 router = APIRouter(prefix="/admin/riders", tags=["admin: riders"])
@@ -86,23 +85,6 @@ def _latest_review(db: Session, rider_id: uuid.UUID) -> Optional[AiReview]:
     if r is None:
         return None
     return AiReview(summary=r.summary, checks=[AiCheck(**c) for c in r.checks], model=r.model, created_at=r.created_at)
-
-
-@router.post("/{rider_id}/ai-review", response_model=RiderDetail)
-def ai_review(rider_id: uuid.UUID, admin: User = Depends(admin_only), db: Session = Depends(get_db)):
-    """Ask Claude to check the rider's documents. Takes 10-30 seconds. The admin still decides."""
-    user = db.get(User, rider_id)
-    if user is None or user.rider_profile is None:
-        raise api_error(404, "rider_not_found", "Rider not found")
-    rp = user.rider_profile
-    docs = db.scalars(select(RiderDocument).where(RiderDocument.rider_id == user.id).order_by(RiderDocument.created_at))
-    try:
-        out = review_documents(user.full_name, rp.vehicle_type.value, rp.vehicle_number, [(d.doc_type.value, d.file_url) for d in docs])
-    except ReviewError as e:
-        raise api_error(503, "ai_review_failed", str(e))
-    db.add(DocumentReview(rider_id=user.id, summary=out["summary"], checks=out["checks"], model=out["model"]))
-    db.commit()
-    return rider_detail(rider_id, admin, db)
 
 
 @router.post("/{rider_id}/decision", response_model=RiderDetail)

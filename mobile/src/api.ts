@@ -265,71 +265,7 @@ export interface Tracking {
   ngo: Place | null;
 }
 
-// ---------- Phase 6: needs by area and disaster alerts ----------
-
-export interface NeedReason {
-  why: string;
-  source: string;
-  date: string | null;
-  place?: string | null;
-  points: number;
-  fresh?: "new" | "recent" | "old";   // last 3 months / this year / over a year
-}
-
-export interface AreaNeed {
-  category_id: number;
-  name: string;
-  level: 0 | 1 | 2 | 3;
-  level_name: "none" | "some" | "high" | "urgent";
-  score: number;
-  reasons: NeedReason[];
-}
-
-export interface AreaRow {
-  id: string;
-  name: string;
-  level: string;
-  lat: number | null;
-  lng: number | null;
-  has_children: boolean;
-  max_level: number;
-  needs: AreaNeed[];
-}
-
-export interface AreaNeeds {
-  place: { id: string; name: string; level: string; parent_id: string | null } | null;
-  summary: AreaNeed[] | null;
-  children: AreaRow[];
-  computed_at: string | null;
-}
-
-export interface DisasterAlert {
-  id: string;
-  type: "flood" | "earthquake" | "cyclone" | "drought" | "heatwave" | "cold_wave" | "heavy_rain" | "other";
-  severity: "watch" | "moderate" | "severe";
-  title: string;
-  summary: string | null;
-  figures: Record<string, number>;
-  started_at: string | null;
-  created_at: string;
-  places: { id: string; name: string; path: string[] }[];
-  needs: { category_id: number; name: string; quantity_needed: number | null; quantity_pledged: number }[];
-  sources: { title: string; url: string | null; publisher: string | null }[];
-  ngos: { id: string; name: string; city: string }[];   // NGOs our riders deliver to near the disaster
-}
-
-// ---------- Phase 6B: appeals and notifications ----------
-
-export interface Appeal {
-  id: string;
-  title: string;
-  message: string;
-  place: string[];
-  categories: { id: number; name: string }[];
-  provinces: string[];
-  sent_at: string | null;
-  ends_at: string | null;
-}
+// ---------- Notifications ----------
 
 export interface AppNotification {
   id: string;

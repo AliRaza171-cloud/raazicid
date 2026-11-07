@@ -9,7 +9,7 @@ Final Year Project, Department of Software Engineering.
 
 | Folder | What | Tech |
 |---|---|---|
-| `backend/` | API, database, AI / RAG (later phases) | Python, FastAPI, SQLAlchemy, PostgreSQL (Neon) + pgvector |
+| `backend/` | API and database | Python, FastAPI, SQLAlchemy, PostgreSQL (Neon) + pgvector |
 | `admin/` | Web app for RAAZICID admins | React + TypeScript (Vite) |
 | `mobile/` | App for donors and riders | React Native (Expo) |
 | `docs/` | Database design, API contract, status flow | Markdown + Mermaid diagrams |
@@ -103,82 +103,6 @@ Commit the updated `package.json` and `package-lock.json` after this step.
 Already installed from an earlier phase? Add the new packages:
 `npx expo install expo-image-picker expo-location react-native-webview` (photo picker from Phase 2, GPS from Phase 3, maps from Phase 4).
 
-### 5. AI (Phase 5, optional)
-
-Everything works without these; the AI parts switch on when they are set up.
-
-- **Photo classifier:** train it in Google Colab with `ml/train_classifier.ipynb` (see `ml/README.md`),
-  copy `raazicid_classifier.pt` and `labels.json` into `backend/models/`, then in the backend venv:
-  ```powershell
-  pip install -r requirements.txt
-  pip install torch --index-url https://download.pytorch.org/whl/cpu
-  ```
-- **AI (document check, news scan, need finder):** OpenAI or Claude. In `backend/.env` set either
-  `AI_PROVIDER=openai` and `OPENAI_API_KEY=` (platform.openai.com; model in `OPENAI_MODEL`, default `gpt-5.5`), or
-  `AI_PROVIDER=claude` and `ANTHROPIC_API_KEY=` (console.anthropic.com). Restart the backend after changing it.
-
-Restart the backend. The admin Dashboard's **AI** card shows what is ready.
-
-### 6. Needs and disaster data (Phase 6)
-
-In the backend venv:
-```powershell
-pip install -r requirements.txt     # adds apscheduler (background fetching)
-python -m app.seed.run              # adds map coordinates for provinces and cities
-```
-Add to `backend/.env`:
-```
-HDX_EMAIL=you@example.com           # HDX HAPI needs an email to identify the app (free, no sign-up)
-WEB_SCAN_EVERY_HOURS=0              # 0 = Claude news scan only when you press "Scan news now"
-```
-While the backend runs it fetches GDACS every 30 minutes and HDX (IPC, food prices, poverty) once a day,
-then recomputes need levels. Admin web: **Disaster alerts** (check, confirm, recommended donations, NGOs nearby, data sources)
-and **Needs by area**. Donor app: **Alerts** tab, the Home banner and "What is needed where".
-
-### 7. Report library and need finder (Phase 6B)
-
-```powershell
-pip install -r requirements.txt          # adds pypdf (reads report PDFs)
-pip install sentence-transformers        # optional: vector search (needs torch; downloads a ~470 MB model once)
-```
-Without `sentence-transformers` the need finder uses keyword search; everything else works. If you install it
-after adding reports, press **Add vectors to … passages** on the Report library page.
-Once ReliefWeb approves your appname, add `RELIEFWEB_APPNAME=...` to `backend/.env`: Pakistan reports from UN
-agencies (UNICEF, WFP, WHO, UNHCR, OCHA…) then arrive every 6 hours, and the need finder looks up ReliefWeb live.
-
-After pulling this version run `alembic upgrade head` once (adds the "read for needs" date to reports).
-
-**NGOs instead of distribution points (Oct 2026).** Run `alembic upgrade head` again: migration 0003 adds the NGO
-tables, turns "at point" and "handed out" donations into "delivered" and removes distribution points, relief camps,
-point requests and hand-outs. Then open **NGOs** in the admin web, choose a city and press **Search the web** (or add
-an NGO you know). When you accept a donation you pick the NGO; the rider drops it there and the job is done.
-Migration 0004 (run `alembic upgrade head` once more) adds the NGO checks. **Find offices on OpenStreetMap** adds
-NGO and charity offices from the free map; NGOs are matched to OCHA's who-works-where (3W) data, and during a
-disaster the NGOs working in the affected districts are suggested first. Tick "confirmed by phone" and "not on a
-banned list" on each NGO before sending donations.
-The **NGO finder** fills the coverage gaps by itself once a day (and from **Find NGOs for these places** on Needs by
-area): for the places in high or urgent need without an NGO nearby, highest need first, it adds offices from
-OpenStreetMap, organisations OCHA 3W lists as working on that need there, and, where both find nothing, up to two web
-searches per run. Settings in `backend/.env`: `NGO_FINDER_EVERY_HOURS=24`, `NGO_AI_SEARCHES_PER_RUN=2` (0 = free sources only).
-The AI then reads every library report for unmet needs; they show up in Needs by area with the report's quote and page.
-
-UN data from HDX HAPI (no extra setup, it comes with the daily HDX fetch): OCHA 3W (who works where), people in
-need by sector, rainfall anomalies and UNHCR refugee totals. Needs by area then shows "Who works here" and
-**Neglected places** (high need, nobody working on it). IOM DTM displacement figures also come through HDX:
-recent ones raise need levels; Pakistan's current DTM data (2022 floods) is older, so it shows in the deprivation layer.
-
-**Long-term deprivation** (PBS PSLM, HIES, IOM DTM): these surveys have no API, so download the tables and upload them
-on Needs by area → **Upload a table** (CSV or Excel). `pip install -r requirements.txt` once (adds openpyxl).
-- PSLM district tables (2019-20, latest district round): pbs.gov.pk → PSLM → District Level 2019-20 → statistical
-  tables (out-of-school children, literacy, water, sanitation, housing, electricity). Copy a table into Excel with a
-  District column and a number column; for literacy or access rates tick "the table gives the opposite".
-- HIES 2024-25 (provinces): the same subjects plus food insecurity (FIES).
-- IOM DTM sheets: data.humdata.org → search "Pakistan DTM" → download the Excel; type the column name, e.g.
-  "IDP Individuals".
-These figures are a few years old, so they are shown on their own and never change the need levels.
-
----
-
 ## Working together
 
 - `main` always works. Build each feature on a branch (`feat/donations-api`), open a pull request,
@@ -189,13 +113,14 @@ These figures are a few years old, so they are shown on their own and never chan
 
 ## Phase status
 
-- [x] Phase 1 — design (ERD, API contract, status flow), skeletons, data source check
+This branch (`fyp-40`) is the 40% evaluation version: accounts and the donation workflow only. The full work
+(AI image classifier, needs by area, disaster alerts, report library and need finder) is kept on the `phase-6c-un`
+branch and comes back after the evaluation.
+
+- [x] Phase 1 — design (ERD, API contract, status flow), skeletons
 - [x] Phase 2 — accounts and authentication (sign-up, login, rider documents and approval)
-- [x] Phase 3 — donations and NGOs (donate flow, admin review, NGOs found by web search or added by hand)
+- [x] Phase 3 — donations and NGOs (donate flow, admin review, NGOs added by the admin)
 - [x] Phase 4 — pickup, delivery to the NGO, tracking (assign rider, proofs with GPS checks, live map)
-- [x] Phase 5 — AI: photo classifier (PyTorch), rider score, urgency v2, Claude document check
-- [x] Phase 6A — needs by area, disaster alerts (GDACS, HDX, AI web scan), recommended donations per disaster
-- [x] Phase 6B — report library, RAG need finder (hybrid search + Claude with citations), appeals, notifications
-- [ ] Phase 7 — seasonal suggestions
-- [ ] Phase 8 — analytics, fraud flags, ratings
-- [ ] Phase 9 — testing, evaluation, deployment
+- [ ] AI image classifier, needs by area, disaster alerts, seasonal suggestions
+- [ ] Analytics, fraud flags, ratings
+- [ ] Testing, evaluation, deployment

@@ -1,23 +1,13 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { useSearchParams } from "react-router-dom";
 import LocationSelect from "../components/LocationSelect";
 import { PageHeader } from "../components/Layout";
 import PinPicker, { type Centre } from "../components/PinPicker";
-import { api, type Category, type Ngo, type NgoOsm, type NgoSearch } from "../lib/api";
+import { api, type Category, type Ngo } from "../lib/api";
 import { date } from "../lib/format";
 
-type Preset = { id: string; path: string[]; lat: number | null; lng: number | null; categoryId: number | null };
-type Editing = { mode: "new"; place?: Preset } | { mode: "edit"; ngo: Ngo };
+type Editing = { mode: "new" } | { mode: "edit"; ngo: Ngo };
 
-/** "Add an NGO in Dadu" from Needs by area opens the form with the place (and item) filled in. */
-function presetFrom(params: URLSearchParams): Preset | undefined {
-  const id = params.get("add");
-  if (!id) return undefined;
-  const num = (k: string) => (params.get(k) ? Number(params.get(k)) : null);
-  return { id, path: (params.get("path") ?? "").split("|").filter(Boolean), lat: num("lat"), lng: num("lng"), categoryId: num("cat") };
-}
-
-/** NGOs, charities and welfare trusts where our riders drop donations. Found by web search or added by hand. */
+/** NGOs, charities and welfare trusts where our riders drop donations, added by the admin. */
 export default function Ngos() {
   const [ngos, setNgos] = useState<Ngo[] | null>(null);
   const [cats, setCats] = useState<Category[]>([]);
@@ -25,13 +15,7 @@ export default function Ngos() {
   const [placeName, setPlaceName] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [showHidden, setShowHidden] = useState(false);
-  const [params] = useSearchParams();
-  const preset = presetFrom(params);
-  const [editing, setEditing] = useState<Editing | null>(preset ? { mode: "new", place: preset } : null);
-  const [searchCat, setSearchCat] = useState("");
-  const [searching, setSearching] = useState(false);
-  const [mapping, setMapping] = useState(false);
-  const [importing, setImporting] = useState(false);
+  const [editing, setEditing] = useState<Editing | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
 
@@ -48,59 +32,6 @@ export default function Ngos() {
     api<Category[]>("/categories").then(setCats).catch(() => undefined);
   }, []);
 
-  const search = async () => {
-    if (!locationId) return setError("Choose a city first");
-    setSearching(true);
-    setError(null);
-    setFlash(null);
-    try {
-      const r = await api<NgoSearch>("/admin/ngos/search", {
-        method: "POST", body: JSON.stringify({ location_id: locationId, category_id: searchCat ? Number(searchCat) : null }),
-      });
-      setFlash(r.status);
-      load();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  const fromMap = async () => {
-    if (!locationId) return setError("Choose a city first");
-    setMapping(true);
-    setError(null);
-    setFlash(null);
-    try {
-      const r = await api<NgoOsm>("/admin/ngos/osm", { method: "POST", body: JSON.stringify({ location_id: locationId }) });
-      setFlash(r.status);
-      load();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setMapping(false);
-    }
-  };
-
-  const importList = async (file: File | undefined) => {
-    if (!file) return;
-    setImporting(true);
-    setError(null);
-    setFlash(null);
-    const form = new FormData();
-    form.append("file", file);
-    try {
-      const r = await api<{ ngos: number; added: number; updated: number; problems: string[] }>("/admin/ngos/import", { method: "POST", body: form });
-      setFlash(`Imported ${r.ngos} NGOs: ${r.added} added to their districts, ${r.updated} already known and filled in.`
-        + (r.problems.length ? ` Check: ${r.problems.join("; ")}` : ""));
-      load();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setImporting(false);
-    }
-  };
-
   const saved = (n: Ngo, created: boolean) => {
     setFlash(created ? `Added ${n.name}` : `Saved ${n.name}`);
     setEditing({ mode: "edit", ngo: n });
@@ -110,12 +41,6 @@ export default function Ngos() {
   return (
     <>
       <PageHeader title="NGOs" sub="NGOs, charities and welfare trusts where our riders drop donations. They give the items to people in need.">
-        <label className="btn ghost" style={{ cursor: importing ? "wait" : "pointer", margin: 0 }}
-          title="CSV or Excel with columns: name, district (several with ;), province, address, phone, website, email, takes, about">
-          {importing ? "Importing… (districts are put on the map)" : "Import a list"}
-          <input type="file" accept=".csv,.txt,.xlsx,.xlsm" hidden disabled={importing}
-            onChange={(e) => { importList(e.target.files?.[0]); e.target.value = ""; }} />
-        </label>
         <button className="btn" onClick={() => setEditing({ mode: "new" })}>+ Add an NGO</button>
       </PageHeader>
       <main className="page">
@@ -129,21 +54,8 @@ export default function Ngos() {
               <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} /> Show hidden
             </label>
           </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", borderTop: "1px solid var(--line)", paddingTop: 10 }}>
-            <strong style={{ marginRight: 4 }}>Find NGOs on the web</strong>
-            <span className="muted small">{placeName ? `in ${placeName}` : "choose a city above"}</span>
-            <select className="select" value={searchCat} onChange={(e) => setSearchCat(e.target.value)} aria-label="Item the NGO should take">
-              <option value="">Any donated goods</option>
-              {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <button className="btn" disabled={searching || !locationId} onClick={search}>{searching ? "Searching the web…" : "Search the web"}</button>
-            <button className="btn ghost" disabled={mapping || !locationId} onClick={fromMap}>{mapping ? "Reading the map…" : "Find offices on OpenStreetMap"}</button>
-            <span className="muted small">Web search takes 1 to 3 minutes and uses AI credit. OpenStreetMap is free and finds offices tagged as NGOs or charities.
-              Call each NGO before the first delivery.</span>
-          </div>
         </section>
 
-        {searching && <div className="flash" style={{ background: "var(--info-bg)", color: "var(--info)" }} role="status">Searching the web for NGOs{placeName ? ` in ${placeName}` : ""} and finding their offices on the map…</div>}
         {flash && <div className="flash ok" role="status">{flash}</div>}
         {error && <div className="flash bad" role="alert">{error}</div>}
 
@@ -153,11 +65,11 @@ export default function Ngos() {
               <p style={{ padding: 18 }} className="muted">Loading NGOs…</p>
             ) : ngos.length === 0 ? (
               <p style={{ padding: 18 }} className="muted">
-                No NGOs {placeName ? `in ${placeName} ` : ""}yet. Choose a city and press <strong>Search the web</strong>, or add one you know.
+                No NGOs {placeName ? `in ${placeName} ` : ""}yet. Press <strong>+ Add an NGO</strong> to add one you know.
               </p>
             ) : (
               <table className="table">
-                <thead><tr><th>NGO</th><th>City</th><th>Takes</th><th>Checks</th><th>Found</th></tr></thead>
+                <thead><tr><th>NGO</th><th>City</th><th>Takes</th><th>Checks</th></tr></thead>
                 <tbody>
                   {ngos.map((n) => (
                     <tr key={n.id} className="click" onClick={() => setEditing({ mode: "edit", ngo: n })}
@@ -166,7 +78,6 @@ export default function Ngos() {
                         <strong>{n.name}</strong>
                         {!n.is_active && <span className="chip wait" style={{ marginLeft: 6 }}>Hidden</span>}
                         <div className="muted small">{[n.phone, n.about].filter(Boolean).join(" · ")}</div>
-                        {n.works_text && <div className="small" style={{ color: "var(--info)", marginTop: 2 }}>{n.works_text}</div>}
                       </td>
                       <td>
                         {n.location_path.slice(-1)[0]}
@@ -188,10 +99,6 @@ export default function Ngos() {
                           {n.registration && <span className="chip ok" style={{ height: 20, fontSize: 11 }}>{n.registration}</span>}
                         </div>
                         <div className="muted small" style={{ marginTop: 3 }}>{n.items_30d} donations / 30 days</div>
-                      </td>
-                      <td className="small">
-                        {n.found_by === "web_search" ? "Web search" : n.found_by === "openstreetmap" ? "OpenStreetMap" : n.found_by === "ocha_3w" ? "OCHA 3W" : n.found_by === "import" ? "Imported list" : "Added by admin"}
-                        {n.source_url && <div><a href={n.source_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Source</a></div>}
                       </td>
                     </tr>
                   ))}
@@ -217,23 +124,21 @@ function NgoPanel({ editing, cats, onClose, onSaved }: {
   onSaved: (n: Ngo, created: boolean) => void;
 }) {
   const start = editing.mode === "edit" ? editing.ngo : null;
-  const preset = editing.mode === "new" ? editing.place : undefined;
   const [name, setName] = useState(start?.name ?? "");
-  const [locationId, setLocationId] = useState<string | null>(start?.location_id ?? preset?.id ?? null);
-  const [changeLocation, setChangeLocation] = useState(!start && !preset);
+  const [locationId, setLocationId] = useState<string | null>(start?.location_id ?? null);
+  const [changeLocation, setChangeLocation] = useState(!start);
   const [address, setAddress] = useState(start?.address ?? "");
   const [coords, setCoords] = useState(start ? `${start.lat}, ${start.lng}` : "");
   const [phone, setPhone] = useState(start?.phone ?? "");
   const [website, setWebsite] = useState(start?.website ?? "");
   const [about, setAbout] = useState(start?.about ?? "");
   const [cooked, setCooked] = useState(start?.takes_cooked_food ?? false);
-  const [accepts, setAccepts] = useState<number[]>(start?.categories.map((c) => c.id) ?? (preset?.categoryId ? [preset.categoryId] : []));
+  const [accepts, setAccepts] = useState<number[]>(start?.categories.map((c) => c.id) ?? []);
   const [active, setActive] = useState(start?.is_active ?? true);
   const [phoneOk, setPhoneOk] = useState(!!start?.phone_confirmed_at);
   const [banOk, setBanOk] = useState(!!start?.ban_checked_at);
   const [registration, setRegistration] = useState(start?.registration ?? "");
-  const [centre, setCentre] = useState<Centre | null>(start ? { name: start.location_path.slice(-1)[0] ?? "", lat: start.lat, lng: start.lng }
-    : preset && preset.lat !== null && preset.lng !== null ? { name: preset.path.slice(-1)[0] ?? "", lat: preset.lat, lng: preset.lng } : null);
+  const [centre, setCentre] = useState<Centre | null>(start ? { name: start.location_path.slice(-1)[0] ?? "", lat: start.lat, lng: start.lng } : null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -270,41 +175,9 @@ function NgoPanel({ editing, cats, onClose, onSaved }: {
   return (
     <aside className="card" style={{ flex: "1 1 360px", display: "flex", flexDirection: "column", gap: 14 }} aria-label="NGO details">
       <div style={{ display: "flex", alignItems: "center" }}>
-        <h2 style={{ margin: 0, fontSize: 18, marginRight: "auto" }}>{start ? start.name : preset ? `Add an NGO in ${preset.path.slice(-1)[0] ?? "this place"}` : "Add an NGO"}</h2>
+        <h2 style={{ margin: 0, fontSize: 18, marginRight: "auto" }}>{start ? start.name : "Add an NGO"}</h2>
         <button onClick={onClose} aria-label="Close" style={{ border: 0, background: "none", fontSize: 22, cursor: "pointer" }}>×</button>
       </div>
-      {start?.found_by === "web_search" && (
-        <div className="flash" style={{ background: "var(--info-bg)", color: "var(--info)" }}>
-          Found by web search{start.source_url ? <> (<a href={start.source_url} target="_blank" rel="noreferrer">source</a>)</> : ""}.
-          Call them before the first delivery to check they take donations.
-        </div>
-      )}
-      {start?.works && start.works.length > 0 && (
-        <div>
-          <div className="kpi-label">Where it works (OCHA 3W)</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 4 }}>
-            {start.works.map((w) => <div key={w.place} className="small"><strong>{w.place}:</strong> {w.sectors.join(", ")}</div>)}
-          </div>
-        </div>
-      )}
-      {start?.found_by === "openstreetmap" && (
-        <div className="flash" style={{ background: "var(--info-bg)", color: "var(--info)" }}>
-          Found on OpenStreetMap{start.source_url ? <> (<a href={start.source_url} target="_blank" rel="noreferrer">map entry</a>)</> : ""}.
-          We do not know what they take yet: call them and tick the items below.
-        </div>
-      )}
-      {start?.found_by === "ocha_3w" && (
-        <div className="flash" style={{ background: "var(--info-bg)", color: "var(--info)" }}>
-          Found in OCHA's who-works-where (3W) data for a place in need. 3W does not give office addresses: search the web
-          or call them to find their office in this city, and ask if they take donated items.
-        </div>
-      )}
-      {start?.found_by === "import" && (
-        <div className="flash" style={{ background: "var(--info-bg)", color: "var(--info)" }}>
-          From a list you imported. It is saved in each district it works in: call them to find the office here and
-          ask which items they take.
-        </div>
-      )}
       {start?.location_approx && (
         <div className="flash" style={{ background: "var(--warn-bg)", color: "var(--warn)" }}>
           Only the city centre is known. Drop the pin on their office, or the first rider's delivery will set it.
@@ -325,7 +198,7 @@ function NgoPanel({ editing, cats, onClose, onSaved }: {
             }} />
           ) : (
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <span style={{ flex: 1 }}>{(start?.location_path ?? preset?.path ?? []).join(" › ")}</span>
+              <span style={{ flex: 1 }}>{start?.location_path.join(" › ")}</span>
               <button type="button" className="btn ghost small" onClick={() => { setChangeLocation(true); setLocationId(null); }}>Change</button>
             </div>
           )}
