@@ -13,13 +13,9 @@ import DonationDetailScreen from "../screens/donor/DonationDetailScreen";
 import DonateScreen from "../screens/donor/DonateScreen";
 import DonationsScreen from "../screens/donor/DonationsScreen";
 import HomeScreen from "../screens/donor/HomeScreen";
-import TrackingScreen from "../screens/donor/TrackingScreen";
 import ProfileScreen from "../screens/ProfileScreen";
-import ActiveJobScreen from "../screens/rider/ActiveJobScreen";
-import HistoryScreen from "../screens/rider/HistoryScreen";
-import JobsScreen from "../screens/rider/JobsScreen";
+import ApprovedScreen from "../screens/rider/ApprovedScreen";
 import PendingScreen from "../screens/rider/PendingScreen";
-import ProofScreen from "../screens/rider/ProofScreen";
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -45,9 +41,7 @@ function DonorTabs() {
 function RiderTabs() {
   return (
     <Tab.Navigator screenOptions={{ headerShown: false, tabBarActiveTintColor: colors.primary, tabBarInactiveTintColor: colors.muted }}>
-      <Tab.Screen name="Jobs" component={JobsScreen} options={tabOptions("list-outline", "Jobs")} />
-      <Tab.Screen name="ActiveJob" component={ActiveJobScreen} options={tabOptions("bicycle-outline", "Active job")} />
-      <Tab.Screen name="History" component={HistoryScreen} options={tabOptions("time-outline", "History")} />
+      <Tab.Screen name="RiderHome" component={ApprovedScreen} options={tabOptions("home-outline", "Home")} />
       <Tab.Screen name="RiderProfile" component={ProfileScreen} options={tabOptions("person-outline", "Profile")} />
     </Tab.Navigator>
   );
@@ -87,7 +81,6 @@ export default function RootNavigator() {
     return (
       <Stack.Navigator>
         <Stack.Screen name="RiderTabs" component={RiderTabs} options={{ headerShown: false }} />
-        <Stack.Screen name="Proof" component={ProofScreen} options={{ title: "Proof" }} />
       </Stack.Navigator>
     );
   }
@@ -97,7 +90,6 @@ export default function RootNavigator() {
       <Stack.Screen name="DonorTabs" component={DonorTabs} options={{ headerShown: false }} />
       <Stack.Screen name="DonateDetails" component={DonateDetailsScreen} options={{ title: "New donation" }} />
       <Stack.Screen name="DonationDetail" component={DonationDetailScreen} options={{ title: "Donation" }} />
-      <Stack.Screen name="Tracking" component={TrackingScreen} options={{ title: "Live tracking" }} />
     </Stack.Navigator>
   );
 }

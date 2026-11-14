@@ -113,14 +113,13 @@ Already installed from an earlier phase? Add the new packages:
 
 ## Phase status
 
-This branch (`fyp-40`) is the 40% evaluation version: accounts and the donation workflow only. The full work
-(AI image classifier, needs by area, disaster alerts, report library and need finder) is kept on the `phase-6c-un`
-branch and comes back after the evaluation.
+This branch (`fyp-p3`) is the FYP-1 evaluation version: Phases 1 to 3 only. Rider pickup, delivery and tracking
+(Phase 4) and the AI work (Phases 5 and 6) are kept on the `phase-6c-un` branch and come back after the evaluation.
 
 - [x] Phase 1 — design (ERD, API contract, status flow), skeletons
 - [x] Phase 2 — accounts and authentication (sign-up, login, rider documents and approval)
-- [x] Phase 3 — donations and NGOs (donate flow, admin review, NGOs added by the admin)
-- [x] Phase 4 — pickup, delivery to the NGO, tracking (assign rider, proofs with GPS checks, live map)
+- [x] Phase 3 — donations and NGOs (donate flow, admin review, NGO directory, drop-off NGO chosen by the admin)
+- [ ] Phase 4 — rider pickup, delivery to the NGO with photo and GPS proof, live tracking
 - [ ] AI image classifier, needs by area, disaster alerts, seasonal suggestions
 - [ ] Analytics, fraud flags, ratings
 - [ ] Testing, evaluation, deployment

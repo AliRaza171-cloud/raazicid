@@ -99,7 +99,7 @@ def decide(rider_id: uuid.UUID, body: DecisionIn, admin: User = Depends(admin_on
         if _doc_count(db, user.id) == 0:
             raise api_error(409, "no_documents", "This rider has not uploaded any documents yet")
         rp.status = RiderStatus.approved
-        notify(db, user, "rider_approved", "You are approved", "You can now go online and take jobs.")
+        notify(db, user, "rider_approved", "You are approved", "Your account is approved. Pickup jobs start in the next phase.")
     elif body.action == "reject":
         rp.status = RiderStatus.rejected
         rp.is_available = False

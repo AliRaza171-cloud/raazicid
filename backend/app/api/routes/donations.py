@@ -11,14 +11,12 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_current_user, require_roles
 from app.core.errors import api_error
 from app.db.session import get_db
-from app.models import Category, Donation, DonationImage, Job, StatusChange, User
+from app.models import Category, Donation, DonationImage, StatusChange, User
 from app.models.enums import DonationStatus, ImageKind, Role
 from app.schemas.donations import DonationIn, DonationList, DonationOut
-from app.schemas.jobs import TrackingOut
 from app.services.donations import (
-    ACTIVE, CANCELLABLE, DONE, change_status, check_location, current_job, donation_out, list_item,
+    ACTIVE, CANCELLABLE, DONE, change_status, check_location, donation_out, list_item,
 )
-from app.services.jobs import tracking
 from app.services.ngos import nearest_food_ngo_km
 from app.services.urgency import food_urgency
 
@@ -41,9 +39,6 @@ def create_donation(body: DonationIn, user: User = Depends(donor_only), db: Sess
                             nearest_food_ngo_km(db, body.pickup.lat, body.pickup.lng))
     d = Donation(
         donor_id=user.id, category_id=cat.id,
-        ai_category_id=body.ai.category_id if body.ai else None,
-        ai_confidence=body.ai.confidence if body.ai else None,
-        ai_top3=body.ai.top3 if body.ai else None,
         title=body.title, description=(body.description or "").strip() or None, quantity=body.quantity,
         condition=None if is_food else body.condition,
         is_food=is_food, food_type=body.food_type if is_food else None,
@@ -82,13 +77,11 @@ def my_donations(
 
 
 def _get_visible(db: Session, donation_id: uuid.UUID, user: User) -> Donation:
-    """Admins, the donor, and a rider who has (or had) a job on it."""
+    """Admins and the donor."""
     d = db.get(Donation, donation_id)
     if d is None:
         raise api_error(404, "donation_not_found", "Donation not found")
     if user.role == Role.admin or d.donor_id == user.id:
-        return d
-    if user.role == Role.rider and db.scalar(select(Job.id).where(Job.donation_id == d.id, Job.rider_id == user.id).limit(1)):
         return d
     raise api_error(404, "donation_not_found", "Donation not found")
 
@@ -107,10 +100,3 @@ def cancel_donation(donation_id: uuid.UUID, user: User = Depends(donor_only), db
     db.commit()
     db.refresh(d)
     return donation_out(db, d)
-
-
-@router.get("/{donation_id}/tracking", response_model=TrackingOut)
-def track(donation_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Where the rider is now. The donor app and admin refresh this every 15 s."""
-    d = _get_visible(db, donation_id, user)
-    return tracking(db, d, current_job(db, d))

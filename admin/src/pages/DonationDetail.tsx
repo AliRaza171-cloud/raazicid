@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { PageHeader } from "../components/Layout";
-import { api, type Donation, type NgoOption, type RiderOption } from "../lib/api";
+import { api, type Donation, type NgoOption } from "../lib/api";
 import { STATUS, dateTime, urgencyChip, windowText } from "../lib/format";
-
-const PROOF = { pickup_proof: "Pickup", delivery_proof: "Handed to the NGO" } as const;
 
 const MATCH: Record<NgoOption["match"], string> = {
   same_area: "Same area",
@@ -25,23 +23,11 @@ export default function DonationDetail() {
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [zoom, setZoom] = useState<string | null>(null);
-  const [riders, setRiders] = useState<RiderOption[] | null>(null);
-  const [riderId, setRiderId] = useState("");
-  const [cancelReason, setCancelReason] = useState("");
-  const [cancelling, setCancelling] = useState(false);
 
   const load = useCallback(() => {
     api<Donation>(`/donations/${id}`)
       .then((data) => {
         setD(data);
-        if (data.status === "accepted") {
-          api<RiderOption[]>(`/admin/donations/${id}/rider-options`)
-            .then((rs) => {
-              setRiders(rs);
-              setRiderId(rs[0]?.id ?? "");
-            })
-            .catch((e) => setError(e.message));
-        }
         if (data.status === "in_review") {
           api<NgoOption[]>(`/admin/donations/${id}/ngo-options`)
             .then((opts) => {
@@ -87,32 +73,7 @@ export default function DonationDetail() {
     }
   };
 
-  const act = async (path: string, body: object, done: (out: Donation) => string) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const out = await api<Donation>(`/admin/donations/${id}/${path}`, { method: "POST", body: JSON.stringify(body) });
-      setD(out);
-      setFlash(done(out));
-      load();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const assign = () => act("assign", { rider_id: riderId }, (out) => `Assigned to ${out.job?.rider_name}. The rider and donor have been told.`);
-
-  const cancelJob = () =>
-    act("cancel-job", { reason: cancelReason.trim() }, () => {
-      setCancelling(false);
-      setCancelReason("");
-      return "Job cancelled. Choose another rider.";
-    });
-
   const city = d ? d.pickup.location_path[Math.min(1, d.pickup.location_path.length - 1)] : "";
-
 
   if (!d) {
     return (
@@ -211,7 +172,7 @@ export default function DonationDetail() {
               <section className="card">
                 <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>Why it is urgent</h2>
                 <p className="muted small" style={{ margin: "0 0 10px" }}>
-                  Score {d.urgency_score} / 100 · rule-based{["in_review", "accepted", "rider_assigned"].includes(d.status) ? " · rises every hour the food waits" : ""}
+                  Score {d.urgency_score} / 100 · rule-based{["in_review", "accepted"].includes(d.status) ? " · rises every hour the food waits" : ""}
                 </p>
                 {d.urgency_reasons.map((r) => (
                   <div key={r.label} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderTop: "1px solid var(--line)",
@@ -220,29 +181,6 @@ export default function DonationDetail() {
                     {r.points > 0 ? <strong>+{r.points}</strong> : null}
                   </div>
                 ))}
-              </section>
-            )}
-
-            {d.proofs.length > 0 && (
-              <section className="card">
-                <h2 style={{ margin: "0 0 10px", fontSize: 16 }}>Proof photos</h2>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 12 }}>
-                  {d.proofs.map((p) => (
-                    <figure key={p.url + p.kind} style={{ margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
-                      <button onClick={() => setZoom(p.url)} aria-label={`Open ${PROOF[p.kind]}`} style={{ padding: 0, border: 0, background: "none", cursor: "zoom-in" }}>
-                        <img src={p.url} alt={PROOF[p.kind]} style={{ width: "100%", height: 120, objectFit: "cover", borderRadius: 10, display: "block" }} />
-                      </button>
-                      <figcaption className="small">
-                        <strong>{PROOF[p.kind]}</strong> · {dateTime(p.at)}
-                        {p.distance_km !== null && (
-                          <span className={`chip ${p.distance_km > 1 ? "bad" : "ok"}`} style={{ marginLeft: 6 }}>
-                            {p.distance_km > 1 ? `${p.distance_km} km away` : "At the right place"}
-                          </span>
-                        )}
-                      </figcaption>
-                    </figure>
-                  ))}
-                </div>
               </section>
             )}
 
@@ -321,79 +259,8 @@ export default function DonationDetail() {
               </>
             ) : d.status === "accepted" ? (
               <>
-                <div>
-                  <h2 style={{ margin: 0, fontSize: 16 }}>Which rider?</h2>
-                  <p className="muted small" style={{ margin: "4px 0 0" }}>Ranked by score: distance to pickup (40), current jobs (20), available now (15), rating (15) and vehicle size for this load (10).</p>
-                </div>
-                {riders === null ? (
-                  <p className="muted">Loading riders…</p>
-                ) : riders.length === 0 ? (
-                  <div className="flash bad">No approved riders yet. <Link to="/riders">Approve a rider</Link> first.</div>
-                ) : (
-                  <div role="radiogroup" aria-label="Rider" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {riders.map((r) => (
-                      <label key={r.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: 12, margin: 0, borderRadius: 10, cursor: "pointer", fontWeight: 400,
-                        border: riderId === r.id ? "2px solid var(--green-700)" : "1px solid var(--line-2)", background: riderId === r.id ? "var(--green-50)" : "#fff" }}>
-                        <input type="radio" name="rider" checked={riderId === r.id} onChange={() => setRiderId(r.id)} style={{ marginTop: 3 }} />
-                        <span style={{ flex: 1 }}>
-                          <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                            <strong style={{ color: "var(--ink)", flex: 1 }}>{r.full_name}</strong>
-                            <span className={`chip ${r.score >= 70 ? "ok" : r.score >= 45 ? "warn" : "wait"}`} title="Recommendation score">{r.score} / 100</span>
-                          </span>
-                          <span className="muted small" style={{ display: "block" }}>{r.vehicle_type} {r.vehicle_number} · {r.phone}</span>
-                          <span className="small" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-                            <span className={`chip ${r.is_available ? "ok" : "wait"}`}>{r.is_available ? "Available" : "Off duty"}</span>
-                            {r.distance_km !== null ? <span className="chip wait">{r.distance_km} km away</span> : <span className="chip wait">{MATCH[r.match]}</span>}
-                            <span className="chip wait">{r.active_jobs} active job{r.active_jobs === 1 ? "" : "s"}</span>
-                          </span>
-                          {riderId === r.id && (
-                            <span className="small" style={{ display: "block", marginTop: 8 }}>
-                              {r.reasons.map((x) => (
-                                <span key={x.label} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                                  <span className="muted">{x.label}</span>
-                                  <strong>+{x.points}</strong>
-                                </span>
-                              ))}
-                            </span>
-                          )}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-                <button className="btn" disabled={busy || !riderId} onClick={assign}>{busy ? "Saving…" : "Assign rider"}</button>
-                <p className="muted small" style={{ margin: 0 }}>The donor can still cancel until a rider is assigned.</p>
-              </>
-            ) : (d.status === "rider_assigned" || d.status === "picked_up") && d.job ? (
-              <>
-                <h2 style={{ margin: 0, fontSize: 16 }}>{d.status === "picked_up" ? `On the way to ${d.ngo?.name ?? "the NGO"}` : d.job.status === "assigned" ? "Waiting for the rider to accept" : "Rider going to pickup"}</h2>
-                <div>
-                  <strong>{d.job.rider_name}</strong>
-                  <div className="muted small">{d.job.vehicle} · {d.job.rider_phone} · assigned {dateTime(d.job.assigned_at)}</div>
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <Link className="btn ghost small" to="/tracking">Live tracking</Link>
-                  <a className="btn ghost small" href={`tel:${d.job.rider_phone}`}>Call rider</a>
-                </div>
-                {d.status === "rider_assigned" && (
-                  !cancelling ? (
-                    <button className="btn danger" onClick={() => setCancelling(true)}>Take the job off this rider</button>
-                  ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      <label htmlFor="creason" style={{ margin: 0 }}>Reason (the rider sees this)</label>
-                      <textarea id="creason" className="input" style={{ height: 70, padding: 10 }} maxLength={500} value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="e.g. Not moving for 30 minutes" />
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button className="btn danger" disabled={busy || cancelReason.trim().length < 3} onClick={cancelJob}>Confirm</button>
-                        <button className="btn ghost" onClick={() => setCancelling(false)}>Back</button>
-                      </div>
-                    </div>
-                  )
-                )}
-              </>
-            ) : d.status === "delivered" ? (
-              <>
-                <h2 style={{ margin: 0, fontSize: 16 }}>Delivered to {d.ngo?.name ?? "the NGO"}</h2>
-                <p className="muted" style={{ margin: 0 }}>Done: the NGO gives the items to people in need. The rider's photo at the NGO is under Proof photos.</p>
+                <h2 style={{ margin: 0, fontSize: 16 }}>Accepted for {d.ngo?.name ?? "the NGO"}</h2>
+                <p className="muted" style={{ margin: 0 }}>Next: a rider picks it up and drops it at the NGO (Phase 4).</p>
               </>
             ) : (
               <>

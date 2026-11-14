@@ -11,9 +11,6 @@ type Sort = "urgency" | "newest" | "oldest";
 const TABS: { key: DonationStatus | "all"; label: string }[] = [
   { key: "in_review", label: "In review" },
   { key: "accepted", label: "Accepted" },
-  { key: "rider_assigned", label: "Rider assigned" },
-  { key: "picked_up", label: "Picked up" },
-  { key: "delivered", label: "Delivered to NGO" },
   { key: "rejected", label: "Rejected" },
   { key: "cancelled", label: "Cancelled" },
   { key: "all", label: "All" },

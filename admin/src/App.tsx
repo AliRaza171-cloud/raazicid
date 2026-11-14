@@ -8,7 +8,6 @@ import Donations from "./pages/Donations";
 import Login from "./pages/Login";
 import Ngos from "./pages/Ngos";
 import Riders from "./pages/Riders";
-import Tracking from "./pages/Tracking";
 
 /** Sends signed-out visitors to /login and remembers where they were going. */
 function RequireAdmin({ children }: { children: ReactNode }) {
@@ -28,7 +27,6 @@ export default function App() {
         <Route index element={<Dashboard />} />
         <Route path="donations" element={<Donations />} />
         <Route path="donations/:id" element={<DonationDetail />} />
-        <Route path="tracking" element={<Tracking />} />
         <Route path="riders" element={<Riders />} />
         <Route path="ngos" element={<Ngos />} />
         <Route path="points" element={<Navigate to="/ngos" replace />} />

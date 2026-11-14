@@ -9,7 +9,6 @@ const groups: { label: string; items: Item[] }[] = [
     items: [
       { to: "/", label: "Dashboard" },
       { to: "/donations", label: "Donations" },
-      { to: "/tracking", label: "Live tracking" },
       { to: "/riders", label: "Riders" },
       { to: "/ngos", label: "NGOs" },
     ],

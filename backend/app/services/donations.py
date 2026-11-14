@@ -8,25 +8,21 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import api_error
-from app.models import Category, Donation, Job, Location, Ngo, StatusChange, User
+from app.models import Category, Donation, Location, Ngo, StatusChange, User
 from app.models.enums import DonationStatus as S
-from app.models.enums import ImageKind, JobStatus
+from app.models.enums import ImageKind
 from app.schemas.donations import (
-    AiSuggestion, CategoryRef, DonationListItem, DonationOut, DonorRef, HistoryItem, JobRef, Pickup, ProofPhoto,
-    UrgencyReason,
+    CategoryRef, DonationListItem, DonationOut, DonorRef, HistoryItem, Pickup, UrgencyReason,
 )
 from app.services.accounts import notify
-from app.services.geo import distance_km
 from app.services.locations import location_path
 from app.services.ngos import nearest_food_ngo_km, ngo_ref
 from app.services.urgency import food_urgency
 
-# Which moves are allowed (from -> to). Phase 4 uses the rider steps.
+# Which moves are allowed (from -> to). The rider steps (rider assigned, picked up, delivered) come in Phase 4.
 ALLOWED: dict[S, set[S]] = {
     S.in_review: {S.accepted, S.rejected, S.cancelled},
-    S.accepted: {S.rider_assigned, S.cancelled},
-    S.rider_assigned: {S.accepted, S.picked_up},
-    S.picked_up: {S.delivered},
+    S.accepted: {S.cancelled},
 }
 ACTIVE = [S.in_review, S.accepted, S.rider_assigned, S.picked_up]
 DONE = [S.delivered, S.rejected, S.cancelled]
@@ -36,9 +32,6 @@ CANCELLABLE = {S.in_review, S.accepted}
 DONOR_MESSAGES: dict[S, tuple[str, str]] = {
     S.accepted: ("Donation accepted", "We accepted \"{title}\". A rider will be assigned for pickup soon."),
     S.rejected: ("Donation not accepted", "We could not accept \"{title}\": {note}"),
-    S.rider_assigned: ("Rider assigned", "A rider is coming to pick up \"{title}\"."),
-    S.picked_up: ("Picked up", "\"{title}\" has been picked up. Thank you!"),
-    S.delivered: ("Delivered to the NGO", "\"{title}\" was delivered to {ngo}, who will give it to people in need. Thank you!"),
 }
 
 
@@ -115,10 +108,6 @@ def donation_out(db: Session, d: Donation) -> DonationOut:
     donor = db.get(User, d.donor_id)
     names = {u.id: u.full_name for u in db.scalars(select(User).where(User.id.in_({h.changed_by for h in d.history if h.changed_by})))}
     _, reasons = urgency_for(db, d)
-    ai = (
-        AiSuggestion(category_id=d.ai_category_id, confidence=d.ai_confidence or 0, top3=d.ai_top3 or [])
-        if d.ai_category_id else None
-    )
     return DonationOut(
         **base.model_dump(),
         description=d.description, condition=d.condition, food_type=d.food_type, prepared_at=d.prepared_at,
@@ -139,44 +128,8 @@ def donation_out(db: Session, d: Donation) -> DonationOut:
             id=donor.id, full_name=donor.full_name, phone=donor.phone,
             donations_count=db.scalar(select(func.count()).select_from(Donation).where(Donation.donor_id == donor.id)) or 0,
         ),
-        ai=ai,
         can_cancel=d.status in CANCELLABLE,
-        job=_job_ref(db, d),
-        proofs=_proofs(db, d, ngo),
     )
-
-
-def current_job(db: Session, d: Donation) -> Optional[Job]:
-    """The newest job that was not declined or cancelled."""
-    return db.scalar(
-        select(Job).where(Job.donation_id == d.id, Job.status.notin_([JobStatus.declined, JobStatus.cancelled]))
-        .order_by(Job.created_at.desc()).limit(1)
-    )
-
-
-def _job_ref(db: Session, d: Donation) -> Optional[JobRef]:
-    job = current_job(db, d)
-    if job is None:
-        return None
-    rider = db.get(User, job.rider_id)
-    rp = rider.rider_profile
-    return JobRef(id=job.id, status=job.status.value, rider_id=rider.id, rider_name=rider.full_name, rider_phone=rider.phone,
-                  vehicle=f"{rp.vehicle_type.value.title()} {rp.vehicle_number}" if rp else "", assigned_at=job.created_at)
-
-
-def _proofs(db: Session, d: Donation, ngo: Optional[Ngo]) -> list[ProofPhoto]:
-    out = []
-    for i in d.images:
-        if i.kind == ImageKind.donor_photo:
-            continue
-        dist = None
-        if i.lat is not None and i.lng is not None:
-            if i.kind == ImageKind.pickup_proof:
-                dist = round(distance_km(i.lat, i.lng, d.pickup_lat, d.pickup_lng), 2)
-            elif ngo is not None and not ngo.location_approx:
-                dist = round(distance_km(i.lat, i.lng, ngo.lat, ngo.lng), 2)
-        out.append(ProofPhoto(kind=i.kind.value, url=i.url, lat=i.lat, lng=i.lng, distance_km=dist, at=i.created_at))
-    return out
 
 
 def check_location(db: Session, location_id: uuid.UUID) -> Location:

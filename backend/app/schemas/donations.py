@@ -10,13 +10,6 @@ from app.models.enums import Condition, DonationStatus, FoodType
 from app.services.geo import in_pakistan
 
 
-class AiSuggestion(BaseModel):
-    """Filled by the on-phone/server classifier from Phase 5. Optional until then."""
-    category_id: int
-    confidence: float = Field(ge=0, le=1)
-    top3: list[dict] = Field(default_factory=list, max_length=3)
-
-
 class PickupIn(BaseModel):
     address: str = Field(min_length=5, max_length=500)
     lat: float
@@ -49,7 +42,6 @@ def _aware(d: datetime) -> datetime:
 
 class DonationIn(BaseModel):
     category_id: int
-    ai: Optional[AiSuggestion] = None
     title: str = Field(min_length=2, max_length=160)
     quantity: int = Field(ge=1, le=10000)
     condition: Optional[Condition] = None
@@ -159,23 +151,6 @@ class Pickup(BaseModel):
     to: Optional[datetime]
 
 
-class ProofPhoto(BaseModel):
-    kind: Literal["pickup_proof", "delivery_proof"]
-    url: str
-    lat: Optional[float]
-    lng: Optional[float]
-    distance_km: Optional[float]   # from where it should have been taken (pickup address / NGO)
-    at: datetime
-
-
-class JobRef(BaseModel):
-    id: uuid.UUID
-    status: str
-    rider_id: uuid.UUID
-    rider_name: str
-    rider_phone: str
-    vehicle: str
-    assigned_at: datetime
 
 
 class DonationOut(DonationListItem):
@@ -190,10 +165,7 @@ class DonationOut(DonationListItem):
     photos: list[str]
     history: list[HistoryItem]
     donor: DonorRef
-    ai: Optional[AiSuggestion]
     can_cancel: bool
-    job: Optional[JobRef] = None          # current rider job (Phase 4)
-    proofs: list[ProofPhoto] = []
 
 
 class DonationCounts(BaseModel):
